@@ -290,5 +290,7 @@ def compute_kpis(data: dict) -> dict:
             "revenue": [rev[y] for y in years],
             "purchase": [pur[y] for y in years],
             "customer_share": [round(pur[y] / rev[y] * 100, 1) for y in years],
+            "pd_history": pd_hist,
+            "plan_revisions": [{"date": s["date"], "volume": s["volumes"][next_year]} for s in snapshots if next_year in s["volumes"]],
         },
     }

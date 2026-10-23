@@ -209,7 +209,7 @@ def _build_case_study() -> tuple:
 
     forecast = revenue_forecast(internal)
     # Reconstructed actuals (index values only in the paper) with deviations giving MAPE ≈ 2.4 %.
-    deviations = [-0.030, 0.018, -0.027, 0.019]
+    deviations = [-0.0297, 0.018, -0.027, 0.019]
     actual_shares = [0.645, 0.665, 0.682, 0.70]
     actual = []
     for f, e, s in zip(forecast, deviations, actual_shares):
