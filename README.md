@@ -1,9 +1,5 @@
 # Supplier Risk Radar
 
-**KI-Frühwarnsystem für finanziell kritische Lieferanten.** Es setzt das Referenzmodell aus diesem Paper als lauffähige Software um:
-
-> Claussen, C.; Haas, F.; Schätter, F.: *Early Detection of Financially Critical Suppliers with Artificial Intelligence: A Design-Oriented Case Study in Automotive Purchasing.* Hochschule Pforzheim.
-
 Ein Agentensystem bewertet alle hinterlegten Lieferanten. Es verknüpft interne Kennzahlen (Customer-Share, Umsatzentwicklung, Planvolumen, Coface-PD, Qualität) mit externen Web-Informationen. Daraus entstehen eine nachvollziehbare Argumentationskette und eine Ampel. Bei einer Eskalation wird der verantwortliche Einkäufer benachrichtigt, im Automode auch per Outlook und Teams.
 
 Das 3D-Cockpit zeigt das Werk des Abnehmers in der Mitte und die Lieferanten als Gebäude ringsum, gruppiert nach Warengruppe. Du kannst nach Name oder Lieferantennummer suchen, filtern und neue Lieferanten direkt anlegen.
