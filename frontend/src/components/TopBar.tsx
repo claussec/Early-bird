@@ -1,7 +1,10 @@
 import { Bell, Bot, Loader2, Radar, RefreshCw } from 'lucide-react'
 import { useState } from 'react'
 import type { Meta, Notification, Supplier } from '../types'
+import { AutomodeControl } from './AutomodeControl'
 import { StatusIcon } from './ui'
+
+const CHANNEL_LABEL: Record<string, string> = { inapp: 'Cockpit', outlook: 'Outlook', teams: 'Teams' }
 
 interface Props {
   meta: Meta | null
@@ -10,12 +13,14 @@ interface Props {
   cycle: { running: boolean; done: number; total: number; current: string }
   onCycle: () => void
   onSelect: (id: string) => void
+  onAutomodeFinished: () => void
 }
 
-export function TopBar({ meta, suppliers, notifications, cycle, onCycle, onSelect }: Props) {
+export function TopBar({ meta, suppliers, notifications, cycle, onCycle, onSelect, onAutomodeFinished }: Props) {
   const [open, setOpen] = useState(false)
   const count = (l: string) => suppliers.filter((s) => s.traffic_light === l).length
   const escalated = suppliers.filter((s) => s.escalate).length
+  const inbox = notifications.filter((n) => n.channel === 'inapp')
 
   return (
     <header className="pointer-events-auto flex flex-wrap items-center gap-3">
@@ -48,6 +53,7 @@ export function TopBar({ meta, suppliers, notifications, cycle, onCycle, onSelec
             <Bot size={15} className="text-accent" /> {meta.llm}
           </div>
         )}
+        <AutomodeControl onCycleFinished={onAutomodeFinished} />
         <button
           onClick={onCycle}
           disabled={cycle.running}
@@ -62,9 +68,9 @@ export function TopBar({ meta, suppliers, notifications, cycle, onCycle, onSelec
         <div className="relative">
           <button onClick={() => setOpen(!open)} className="glass relative rounded-2xl p-2.5 text-ink-2 hover:text-ink-1" aria-label="Benachrichtigungen">
             <Bell size={18} />
-            {notifications.length > 0 && (
+            {inbox.length > 0 && (
               <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-crit px-1 font-mono text-[10px] font-semibold text-white">
-                {notifications.length}
+                {inbox.length}
               </span>
             )}
           </button>
@@ -82,7 +88,8 @@ export function TopBar({ meta, suppliers, notifications, cycle, onCycle, onSelec
                 >
                   <div className="text-[13px] font-medium text-ink-1">{n.subject}</div>
                   <div className="text-[11px] text-ink-3">
-                    an {n.recipient} · {new Date(n.created_at).toLocaleString('de-DE')}
+                    {CHANNEL_LABEL[n.channel] ?? n.channel} · an {n.recipient} · {new Date(n.created_at).toLocaleString('de-DE')}
+                    {n.status === 'failed' && <span className="text-[#ff8a8a]" title={n.error}> · fehlgeschlagen</span>}
                   </div>
                 </button>
               ))}

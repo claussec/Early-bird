@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, stream } from './api'
 import { DetailPanel } from './components/DetailPanel'
 import { EMPTY_FILTERS, FilterPanel, applyFilters } from './components/FilterPanel'
+import { SupplierForm } from './components/SupplierForm'
 import { Legend, TopBar } from './components/TopBar'
 import { Scene } from './scene/Scene'
 import type { Filters, Meta, Notification, StepState, Supplier, SupplierDetail } from './types'
@@ -11,13 +12,15 @@ export default function App() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Deep link from notification e-mails / Teams cards: /?supplier=S1002
+  const [selectedId, setSelectedId] = useState<string | null>(() => new URLSearchParams(window.location.search).get('supplier'))
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [detail, setDetail] = useState<SupplierDetail | null>(null)
   const [steps, setSteps] = useState<Record<string, StepState> | null>(null)
   const [running, setRunning] = useState(false)
   const [cycle, setCycle] = useState({ running: false, done: 0, total: 0, current: '' })
   const [error, setError] = useState<string | null>(null)
+  const [showForm, setShowForm] = useState(false)
 
   const refresh = useCallback(async () => {
     try {
@@ -66,6 +69,28 @@ export default function App() {
     }
   }
 
+  const deleteSelected = async () => {
+    if (!selectedId) return
+    await api.deleteSupplier(selectedId)
+    setSelectedId(null)
+    await refresh()
+  }
+
+  const onCreated = async (s: Supplier) => {
+    setShowForm(false)
+    setFilters(EMPTY_FILTERS)
+    await refresh()
+    setSelectedId(s.id)
+  }
+
+  const selectedRef = useRef(selectedId)
+  selectedRef.current = selectedId
+  const onAutomodeFinished = useCallback(async () => {
+    await refresh()
+    const id = selectedRef.current
+    if (id) setDetail(await api.supplier(id).catch(() => null))
+  }, [refresh])
+
   const runCycle = async () => {
     setCycle({ running: true, done: 0, total: suppliers.length, current: '' })
     try {
@@ -100,7 +125,15 @@ export default function App() {
       </div>
 
       <div className="pointer-events-none absolute inset-0 z-10 flex flex-col gap-3 p-3 md:gap-4 md:p-4">
-        <TopBar meta={meta} suppliers={suppliers} notifications={notifications} cycle={cycle} onCycle={runCycle} onSelect={setSelectedId} />
+        <TopBar
+          meta={meta}
+          suppliers={suppliers}
+          notifications={notifications}
+          cycle={cycle}
+          onCycle={runCycle}
+          onSelect={setSelectedId}
+          onAutomodeFinished={onAutomodeFinished}
+        />
         {error && (
           <div className="glass pointer-events-auto self-start rounded-xl border-crit/50 px-4 py-3 text-sm text-[#ff8a8a]">{error}</div>
         )}
@@ -117,6 +150,7 @@ export default function App() {
                 selectedId={selectedId}
                 onSelect={setSelectedId}
                 onHover={setHoveredId}
+                onAdd={() => setShowForm(true)}
               />
             </div>
           )}
@@ -129,6 +163,7 @@ export default function App() {
               running={running}
               onRun={runAnalysis}
               onClose={() => setSelectedId(null)}
+              onDelete={deleteSelected}
             />
           )}
         </div>
@@ -136,6 +171,7 @@ export default function App() {
           <Legend />
         </div>
       </div>
+      {showForm && meta && <SupplierForm commodities={meta.commodities} onCreated={onCreated} onClose={() => setShowForm(false)} />}
     </div>
   )
 }

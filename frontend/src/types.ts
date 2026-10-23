@@ -15,18 +15,19 @@ export interface Supplier {
   commodity: string
   buyer: Buyer
   register_status: Light
-  is_case_study: boolean
+  source: string
   score?: number
   traffic_light?: Light
   escalate?: boolean
   assessed_at?: string
   as_of?: string
-  customer_share?: number
-  pd?: number
+  customer_share?: number | null
+  pd?: number | null
   revenue_forecast?: number | null
-  purchase_volume?: number
-  revenue?: number
+  purchase_volume?: number | null
+  revenue?: number | null
   external_risks?: number
+  missing_sources?: string[]
   headline?: string
 }
 
@@ -110,23 +111,14 @@ export interface Report {
     measures: string[]
   }
   decision: { traffic_light: Light; escalate: boolean; confidence: string; justification: string }
-  notification: Notification | null
-}
-
-export interface Backtest {
-  description: string
-  actual: { year: number; revenue: number; customer_share: number }[]
-  actual_pd: { date: string; pd: number }[]
-  paper_table: string[][]
-  rows: { year: number; forecast: number; actual: number; ape: number; actual_share: number }[]
-  mape: number | null
+  missing_sources: string[]
+  deliveries: Notification[]
 }
 
 export interface SupplierDetail {
   supplier: Supplier
   report: Report | null
   history: { created_at: string; score: number; traffic_light: Light; llm: string }[]
-  backtest: Backtest | null
 }
 
 export interface Notification {
@@ -136,6 +128,46 @@ export interface Notification {
   recipient: string
   subject: string
   body: string
+  channel: string
+  status: 'sent' | 'failed'
+  error: string
+}
+
+export interface Channel {
+  id: string
+  name: string
+  configured: boolean
+}
+
+export interface Automode {
+  enabled: boolean
+  interval_minutes: number
+  channels: string[]
+  last_run: string | null
+  next_run: string | null
+  running: boolean
+  last_result: { suppliers: number; escalations: number; sent: number; failed: number; source_notes: string[] } | null
+}
+
+export interface SupplierInput {
+  number: string
+  name: string
+  commodity: string
+  city: string
+  country: string
+  website: string
+  buyer_name: string
+  buyer_email: string | null
+  register_status: Light
+  figures: {
+    years: { year: number; revenue: number; purchase: number }[]
+    plan_next_year: number | null
+    pd_current: number | null
+    pd_previous: number | null
+    ppm_current: number | null
+    ppm_previous: number | null
+    otd: number | null
+  } | null
 }
 
 export interface Meta {

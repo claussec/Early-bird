@@ -133,14 +133,6 @@ export function SupplierBuilding({ supplier: s, x, z, dimmed, selected, hovered,
         </>
       )}
 
-      {s.is_case_study && !dimmed && (
-        <Html position={[0, h + (s.escalate ? 2.6 : 1.2), 0]} center zIndexRange={[10, 0]}>
-          <div className="pointer-events-none whitespace-nowrap rounded-md border border-amber-300/40 bg-amber-300/15 px-2 py-0.5 text-[11px] font-semibold text-amber-200">
-            Fallstudie · Daten 2019
-          </div>
-        </Html>
-      )}
-
       {(hovered || selected) && !dimmed && (
         <Html position={[0, h + 3.2, 0]} center zIndexRange={[20, 10]}>
           <div className="glass pointer-events-none w-56 rounded-xl px-3 py-2 text-xs">

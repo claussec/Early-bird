@@ -4,22 +4,24 @@ import {
   Bot,
   CheckCircle2,
   ExternalLink,
-  FlaskConical,
   Globe,
   LineChart as LineIcon,
   Loader2,
   Play,
   ScrollText,
+  Trash2,
   User,
   X,
 } from 'lucide-react'
 import { useState } from 'react'
 import { KPI_STATUS, STATUS, fmt } from '../theme'
 import type { Meta, StepState, SupplierDetail } from '../types'
-import { BacktestChart, PdChart, PlanChart, RevenueChart, ShareChart } from './Charts'
+import { PdChart, PlanChart, RevenueChart, ShareChart } from './Charts'
 import { ScoreGauge, Section, StatusBadge, StatusIcon } from './ui'
 
-type Tab = 'overview' | 'agents' | 'data' | 'web' | 'backtest'
+type Tab = 'overview' | 'agents' | 'data' | 'web'
+
+const SOURCE_LABEL: Record<string, string> = { manual: 'Manuell erfasst', demo: 'Demodaten', sap: 'SAP', erp: 'ERP' }
 
 interface Props {
   detail: SupplierDetail
@@ -28,20 +30,21 @@ interface Props {
   running: boolean
   onRun: () => void
   onClose: () => void
+  onDelete: () => void
 }
 
-export function DetailPanel({ detail, meta, steps, running, onRun, onClose }: Props) {
+export function DetailPanel({ detail, meta, steps, running, onRun, onClose, onDelete }: Props) {
   const [tab, setTab] = useState<Tab>('overview')
-  const { supplier: s, report, backtest } = detail
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const { supplier: s, report } = detail
   const light = report?.decision.traffic_light ?? 'green'
   const tabs: { id: Tab; label: string; icon: typeof Bot }[] = [
     { id: 'overview', label: 'Übersicht', icon: ScrollText },
     { id: 'agents', label: 'KI-Agenten', icon: Bot },
     { id: 'data', label: 'Daten', icon: LineIcon },
     { id: 'web', label: 'Web', icon: Globe },
-    ...(backtest ? [{ id: 'backtest' as Tab, label: 'Backtest', icon: FlaskConical }] : []),
   ]
-  const activeTab = tab === 'backtest' && !backtest ? 'overview' : tab
+  const activeTab = tab
 
   return (
     <aside className="glass pointer-events-auto flex max-h-full w-full flex-col overflow-hidden rounded-2xl md:w-[500px]">
@@ -50,21 +53,42 @@ export function DetailPanel({ detail, meta, steps, running, onRun, onClose }: Pr
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-[11px] text-ink-3">
               <span className="font-mono">{s.number}</span>·<span>{s.commodity}</span>
-              {s.is_case_study && <span className="rounded bg-amber-300/15 px-1.5 text-amber-200">Fallstudie</span>}
+              <span className="rounded bg-white/5 px-1.5">{SOURCE_LABEL[s.source] ?? s.source}</span>
             </div>
             <h2 className="mt-1 text-lg font-semibold leading-snug text-ink-1">{s.name}</h2>
             <div className="mt-1 flex items-center gap-3 text-xs text-ink-3">
-              <span>
-                {s.city}, {s.country}
-              </span>
-              <span className="flex items-center gap-1">
-                <User size={12} /> {s.buyer.name}
-              </span>
+              {(s.city || s.country) && <span>{[s.city, s.country].filter(Boolean).join(', ')}</span>}
+              {s.buyer.name && (
+                <span className="flex items-center gap-1">
+                  <User size={12} /> {s.buyer.name}
+                </span>
+              )}
             </div>
           </div>
-          <button onClick={onClose} className="rounded-lg p-1.5 text-ink-3 hover:bg-white/5 hover:text-ink-1" aria-label="Schließen">
-            <X size={18} />
-          </button>
+          <div className="flex shrink-0 items-center gap-1">
+            {confirmDelete ? (
+              <>
+                <button onClick={onDelete} className="rounded-lg bg-crit/20 px-2 py-1 text-xs font-medium text-[#ff8a8a] hover:bg-crit/30">
+                  Löschen
+                </button>
+                <button onClick={() => setConfirmDelete(false)} className="rounded-lg px-2 py-1 text-xs text-ink-3 hover:text-ink-1">
+                  Abbrechen
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => setConfirmDelete(true)}
+                className="rounded-lg p-1.5 text-ink-3 hover:bg-white/5 hover:text-[#ff8a8a]"
+                aria-label="Lieferant löschen"
+                title="Lieferant löschen"
+              >
+                <Trash2 size={16} />
+              </button>
+            )}
+            <button onClick={onClose} className="rounded-lg p-1.5 text-ink-3 hover:bg-white/5 hover:text-ink-1" aria-label="Schließen">
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         {report && (
@@ -77,7 +101,7 @@ export function DetailPanel({ detail, meta, steps, running, onRun, onClose }: Pr
                 <StatusBadge light={s.register_status} size="sm" />
               </div>
               {report.decision.escalate ? (
-                <div className="text-xs font-medium text-[#ff8a8a]">Eskaliert an {s.buyer.name}</div>
+                <div className="text-xs font-medium text-[#ff8a8a]">Eskaliert an {s.buyer.name || 'Einkäufer'}</div>
               ) : (
                 <div className="text-xs text-ink-3">Keine Eskalation erforderlich</div>
               )}
@@ -126,11 +150,12 @@ export function DetailPanel({ detail, meta, steps, running, onRun, onClose }: Pr
             <ShareChart report={report} />
             <PdChart history={report.series.pd_history} />
             <PlanChart report={report} />
+            {!report.series.years.length && !report.series.pd_history.length && (
+              <p className="text-sm text-ink-3">Für diesen Lieferanten sind noch keine Zeitreihen hinterlegt.</p>
+            )}
           </div>
-        ) : activeTab === 'web' ? (
-          <Web detail={detail} />
         ) : (
-          <BacktestView detail={detail} />
+          <Web detail={detail} />
         )}
       </div>
     </aside>
@@ -141,6 +166,12 @@ function Overview({ detail }: { detail: SupplierDetail }) {
   const r = detail.report!
   return (
     <>
+      {r.missing_sources?.length > 0 && (
+        <div className="mt-4 rounded-xl border border-warn/40 bg-warn/10 p-3 text-xs leading-relaxed text-ink-2">
+          <b className="text-ink-1">Datenlage unvollständig.</b> Keine Daten aus: {r.missing_sources.join(', ')}. Die Bewertung stützt sich
+          nur auf die vorhandenen Quellen.
+        </div>
+      )}
       <Section title="Empfehlung">
         <p className="text-sm leading-relaxed text-ink-1">{r.argumentation.recommendation}</p>
         <p className="mt-2 text-xs leading-relaxed text-ink-3">{r.argumentation.summary}</p>
@@ -155,6 +186,7 @@ function Overview({ detail }: { detail: SupplierDetail }) {
         </ul>
       </Section>
       <Section title="Kennzahlen (Internal Module)">
+        {!r.kpis.length && <p className="text-xs text-ink-3">Keine Kennzahlen hinterlegt.</p>}
         <div className="grid grid-cols-2 gap-2">
           {r.kpis.map((k) => (
             <div key={k.id} className="group relative rounded-xl border border-line bg-surface-0/50 p-3" title={`${k.formula}\nSchwelle: ${k.threshold}\nQuelle: ${k.source}`}>
@@ -335,67 +367,5 @@ function Web({ detail }: { detail: SupplierDetail }) {
         {!r.external.length && <p className="text-xs text-ink-3">Keine externen Dokumente.</p>}
       </div>
     </Section>
-  )
-}
-
-function BacktestView({ detail }: { detail: SupplierDetail }) {
-  const r = detail.report!
-  const b = detail.backtest!
-  return (
-    <>
-      <Section title="Validierung 2019 → 2023">
-        <p className="text-xs leading-relaxed text-ink-3">{b.description}</p>
-        <div className="mt-3 grid grid-cols-3 gap-2">
-          <div className="rounded-xl border border-line bg-surface-0/50 p-3">
-            <div className="text-[11px] text-ink-3">MAPE Umsatz</div>
-            <div className="mt-1 font-mono text-2xl font-semibold text-ink-1">{fmt(b.mape, 2)} %</div>
-          </div>
-          <div className="rounded-xl border border-line bg-surface-0/50 p-3">
-            <div className="text-[11px] text-ink-3">Prognose 2020</div>
-            <div className="mt-1 font-mono text-2xl font-semibold text-ink-1">{fmt(b.rows[0]?.forecast, 2)}</div>
-            <div className="text-[10px] text-ink-3">Mio. €</div>
-          </div>
-          <div className="rounded-xl border border-line bg-surface-0/50 p-3">
-            <div className="text-[11px] text-ink-3">Alarm möglich</div>
-            <div className="mt-1 font-mono text-2xl font-semibold text-ink-1">2019</div>
-            <div className="text-[10px] text-ink-3">statt 2020</div>
-          </div>
-        </div>
-      </Section>
-      <Section title="Umsatz: KI-Prognose vs. Ist (Mio. €)">
-        <BacktestChart report={r} backtest={b} />
-      </Section>
-      <Section title="PD-Entwicklung inkl. Ist 2020–2022">
-        <PdChart history={[...r.series.pd_history, ...b.actual_pd]} />
-      </Section>
-      <Section title="Vergleich mit dem Paper (Table 1)">
-        <div className="overflow-hidden rounded-xl border border-line">
-          <table className="w-full text-left text-[11px]">
-            <thead className="bg-white/5 text-ink-3">
-              <tr>
-                <th className="p-2 font-medium">Indikator</th>
-                <th className="p-2 font-medium">KI (Daten 2019)</th>
-                <th className="p-2 font-medium">Ist 2019–23</th>
-                <th className="p-2 font-medium">Urteil</th>
-              </tr>
-            </thead>
-            <tbody>
-              {b.paper_table.map((row) => (
-                <tr key={row[0]} className="border-t border-line/60 align-top">
-                  <td className="p-2 text-ink-1">{row[0]}</td>
-                  <td className="p-2 text-ink-2">{row[1]}</td>
-                  <td className="p-2 text-ink-2">{row[2]}</td>
-                  <td className="p-2">
-                    <StatusBadge light="green" size="sm">
-                      {row[3]}
-                    </StatusBadge>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Section>
-    </>
   )
 }

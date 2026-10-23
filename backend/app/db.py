@@ -35,7 +35,14 @@ CREATE TABLE IF NOT EXISTS notifications (
     created_at TEXT NOT NULL,
     recipient TEXT NOT NULL,
     subject TEXT NOT NULL,
-    body TEXT NOT NULL
+    body TEXT NOT NULL,
+    channel TEXT NOT NULL DEFAULT 'inapp',
+    status TEXT NOT NULL DEFAULT 'sent',
+    error TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value JSON NOT NULL
 );
 """
 
@@ -74,9 +81,49 @@ def upsert_supplier(master: dict, internal: dict, external: list[dict]) -> None:
         )
 
 
+def upsert_master(master: dict) -> None:
+    with connect() as c:
+        c.execute("INSERT OR REPLACE INTO suppliers VALUES (?, ?)", (master["id"], json.dumps(master)))
+
+
 def list_suppliers() -> list[dict]:
     with connect() as c:
         return [json.loads(r["master"]) for r in c.execute("SELECT master FROM suppliers ORDER BY id")]
+
+
+def find_supplier_by_number(number: str) -> dict | None:
+    n = number.strip().lower()
+    return next((s for s in list_suppliers() if s["number"].lower() == n), None)
+
+
+def next_supplier_id() -> str:
+    with connect() as c:
+        ids = [r["id"] for r in c.execute("SELECT id FROM suppliers")]
+    numeric = [int(i[1:]) for i in ids if i[1:].isdigit()]
+    return f"S{max(numeric, default=999) + 1}"
+
+
+def save_internal(supplier_id: str, data: dict) -> None:
+    with connect() as c:
+        c.execute("INSERT OR REPLACE INTO internal_data VALUES (?, ?)", (supplier_id, json.dumps(data)))
+
+
+def delete_supplier(supplier_id: str) -> None:
+    with connect() as c:
+        for table in ("notifications", "results", "external_data", "internal_data"):
+            c.execute(f"DELETE FROM {table} WHERE supplier_id = ?", (supplier_id,))
+        c.execute("DELETE FROM suppliers WHERE id = ?", (supplier_id,))
+
+
+def get_setting(key: str, default=None):
+    with connect() as c:
+        row = c.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        return json.loads(row["value"]) if row else default
+
+
+def set_setting(key: str, value) -> None:
+    with connect() as c:
+        c.execute("INSERT OR REPLACE INTO settings VALUES (?, ?)", (key, json.dumps(value)))
 
 
 def get_supplier(supplier_id: str) -> dict | None:
@@ -128,14 +175,26 @@ def result_history(supplier_id: str, limit: int = 20) -> list[dict]:
         return [json.loads(r["report"]) for r in rows]
 
 
-def add_notification(supplier_id: str, recipient: str, subject: str, body: str) -> dict:
+def add_notification(
+    supplier_id: str, recipient: str, subject: str, body: str, channel: str = "inapp", status: str = "sent", error: str = ""
+) -> dict:
     created = now()
     with connect() as c:
         c.execute(
-            "INSERT INTO notifications (supplier_id, created_at, recipient, subject, body) VALUES (?, ?, ?, ?, ?)",
-            (supplier_id, created, recipient, subject, body),
+            """INSERT INTO notifications (supplier_id, created_at, recipient, subject, body, channel, status, error)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (supplier_id, created, recipient, subject, body, channel, status, error),
         )
-    return {"supplier_id": supplier_id, "created_at": created, "recipient": recipient, "subject": subject, "body": body}
+    return {
+        "supplier_id": supplier_id,
+        "created_at": created,
+        "recipient": recipient,
+        "subject": subject,
+        "body": body,
+        "channel": channel,
+        "status": status,
+        "error": error,
+    }
 
 
 def list_notifications(limit: int = 50) -> list[dict]:

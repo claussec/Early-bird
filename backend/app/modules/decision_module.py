@@ -9,6 +9,7 @@ The escalation itself (notification to the buyer) is handled by the pipeline.
 """
 
 import math
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel
@@ -80,7 +81,7 @@ def map_indicators(kpis: list[dict], external: list[dict], as_of: str) -> list[d
                 "evidence": k["formula"],
             }
         )
-    ref_year = int(as_of[:4])
+    ref_year = int(as_of[:4]) if as_of else date.today().year
     for i, doc in enumerate(external):
         if doc["signal"] == "neutral":
             continue

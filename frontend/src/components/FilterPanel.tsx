@@ -1,4 +1,4 @@
-import { ChevronDown, Search, SlidersHorizontal, X } from 'lucide-react'
+import { ChevronDown, Plus, Search, SlidersHorizontal, X } from 'lucide-react'
 import { useState } from 'react'
 import { STATUS, fmt } from '../theme'
 import type { Filters, Light, Supplier } from '../types'
@@ -14,6 +14,7 @@ interface Props {
   selectedId: string | null
   onSelect: (id: string) => void
   onHover: (id: string | null) => void
+  onAdd: () => void
 }
 
 export const EMPTY_FILTERS: Filters = {
@@ -42,7 +43,18 @@ export function applyFilters(suppliers: Supplier[], f: Filters) {
 
 const toggle = <T,>(list: T[], v: T) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v])
 
-export function FilterPanel({ filters, setFilters, suppliers, visible, commodities, countries, selectedId, onSelect, onHover }: Props) {
+export function FilterPanel({
+  filters,
+  setFilters,
+  suppliers,
+  visible,
+  commodities,
+  countries,
+  selectedId,
+  onSelect,
+  onHover,
+  onAdd,
+}: Props) {
   const active =
     filters.query ||
     filters.lights.length ||
@@ -65,7 +77,7 @@ export function FilterPanel({ filters, setFilters, suppliers, visible, commoditi
             <input
               value={filters.query}
               onChange={(e) => setFilters({ ...filters, query: e.target.value })}
-              placeholder="Lieferant, Nummer, Ort, Einkäufer …"
+              placeholder="Name oder Lieferantennr. …"
               className="w-full rounded-xl border border-line bg-surface-0/70 py-2 pl-9 pr-8 text-sm text-ink-1 placeholder:text-ink-3 focus:border-accent/70 focus:outline-none"
             />
             {filters.query && (
@@ -77,6 +89,14 @@ export function FilterPanel({ filters, setFilters, suppliers, visible, commoditi
               </button>
             )}
           </div>
+          <button
+            onClick={onAdd}
+            className="flex items-center justify-center rounded-xl bg-accent px-2.5 text-white hover:brightness-110"
+            aria-label="Lieferant anlegen"
+            title="Lieferant anlegen"
+          >
+            <Plus size={18} />
+          </button>
           <button
             onClick={() => setOpen(!open)}
             className="flex items-center gap-1 rounded-xl border border-line px-2.5 text-xs text-ink-2 md:hidden"
@@ -197,7 +217,20 @@ export function FilterPanel({ filters, setFilters, suppliers, visible, commoditi
             </button>
           </li>
         ))}
-        {!sorted.length && <li className="px-3 py-6 text-center text-xs text-ink-3">Keine Lieferanten für diese Filter.</li>}
+        {!sorted.length && (
+          <li className="px-3 py-6 text-center text-xs text-ink-3">
+            {suppliers.length ? (
+              'Keine Lieferanten für diese Filter.'
+            ) : (
+              <>
+                Noch keine Lieferanten erfasst.
+                <button onClick={onAdd} className="mt-2 block w-full text-accent hover:underline">
+                  Ersten Lieferanten anlegen
+                </button>
+              </>
+            )}
+          </li>
+        )}
       </ul>
     </aside>
   )

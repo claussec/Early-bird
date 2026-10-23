@@ -10,7 +10,7 @@ import {
   YAxis,
 } from 'recharts'
 import { SERIES, STATUS, fmt } from '../theme'
-import type { Backtest, Report } from '../types'
+import type { Report } from '../types'
 
 const axis = { stroke: '#3a4352', tick: { fill: '#8b8a83', fontSize: 11 }, tickLine: false }
 const grid = <CartesianGrid stroke="#1c232e" vertical={false} />
@@ -33,6 +33,7 @@ function ChartCard({ title, children, note }: { title: string; children: React.R
 
 export function RevenueChart({ report }: { report: Report }) {
   const { years, revenue } = report.series
+  if (!years.length) return null
   const data: { year: number; ist?: number; prognose?: number }[] = years.map((y, i) => ({ year: y, ist: revenue[i] }))
   data[data.length - 1].prognose = revenue[revenue.length - 1]
   report.forecast.forEach((f) => data.push({ year: f.year, prognose: f.revenue }))
@@ -54,6 +55,7 @@ export function RevenueChart({ report }: { report: Report }) {
 }
 
 export function ShareChart({ report }: { report: Report }) {
+  if (!report.series.years.length) return null
   const data = report.series.years.map((y, i) => ({ year: y, share: report.series.customer_share[i] }))
   return (
     <ChartCard title="Customer-Share (%)" note="Anteil des Lieferantenumsatzes, der auf den Abnehmer entfällt">
@@ -72,6 +74,7 @@ export function ShareChart({ report }: { report: Report }) {
 }
 
 export function PdChart({ history }: { history: { date: string; pd: number }[] }) {
+  if (!history.length) return null
   return (
     <ChartCard title="Coface-Ausfallwahrscheinlichkeit (PD, %)" note="Ratingstände; Gelb ab 1 %, Rot ab 3 %">
       <ResponsiveContainer>
@@ -86,29 +89,6 @@ export function PdChart({ history }: { history: { date: string; pd: number }[] }
         </LineChart>
       </ResponsiveContainer>
     </ChartCard>
-  )
-}
-
-export function BacktestChart({ report, backtest }: { report: Report; backtest: Backtest }) {
-  const { years, revenue } = report.series
-  const data: { year: number; ist?: number; prognose?: number }[] = years.map((y, i) => ({ year: y, ist: revenue[i] }))
-  data[data.length - 1].prognose = revenue[revenue.length - 1]
-  backtest.rows.forEach((r) => data.push({ year: r.year, ist: r.actual, prognose: r.forecast }))
-  return (
-    <div className="h-56">
-      <ResponsiveContainer>
-        <LineChart data={data} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
-          {grid}
-          <XAxis dataKey="year" {...axis} />
-          <YAxis {...axis} domain={['auto', 'auto']} />
-          <Tooltip {...tooltipStyle} formatter={(v: number) => `${fmt(v, 2)} Mio. €`} />
-          {legend}
-          <ReferenceLine x={2019} stroke="#c3c2b7" strokeDasharray="3 3" label={{ value: 'Datenstand', fill: '#c3c2b7', fontSize: 10, position: 'insideTopLeft' }} />
-          <Line dataKey="ist" name="Ist-Entwicklung" stroke={SERIES.actual} strokeWidth={2} dot={{ r: 3 }} isAnimationActive={false} activeDot={{ r: 5 }} />
-          <Line dataKey="prognose" name="KI-Prognose (Daten bis 2019)" stroke={SERIES.forecast} strokeWidth={2} strokeDasharray="5 4" dot={{ r: 3 }} isAnimationActive={false} />
-        </LineChart>
-      </ResponsiveContainer>
-    </div>
   )
 }
 

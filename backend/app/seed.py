@@ -1,18 +1,8 @@
-"""Synthetic demo data.
-
-All companies are fictitious. The case-study supplier reconstructs the
-application example from the paper (sub-supplier for metal components, data
-available until end of 2019). The figures published in the paper are used
-as-is (revenue 2014/2019, customer-share 62.8 %, PD 0.7 % -> 2 %, forecast
-2020 = 30.28 Mio. €). The actual 2020–2023 revenues were published only as an
-index, so they are reconstructed here to reproduce the reported MAPE of
-about 2.4 % and are marked as illustrative.
-"""
+"""Synthetic demo data (SEED_DEMO_DATA=true). All companies are fictitious."""
 
 import random
 
 from . import db
-from .modules.internal_module import revenue_forecast
 
 COMMODITIES = [
     "Metall & Umformung",
@@ -151,7 +141,7 @@ def _build_regular(idx: int, name: str, city: str, country: str, commodity: int,
         "commodity": COMMODITIES[commodity],
         "buyer": BUYERS[idx % len(BUYERS)],
         "register_status": register,
-        "is_case_study": False,
+        "source": "demo",
     }
     internal = {
         "as_of": f"{last}-12",
@@ -174,85 +164,7 @@ def _build_regular(idx: int, name: str, city: str, country: str, commodity: int,
     return master, internal, external
 
 
-def _build_case_study() -> tuple:
-    years = list(range(2014, 2020))
-    revenue = {"2014": 25.93, "2015": 27.40, "2016": 29.12, "2017": 31.05, "2018": 33.10, "2019": 34.85}
-    shares = [0.52, 0.54, 0.56, 0.585, 0.605, 0.628]
-    purchase = {str(y): round(revenue[str(y)] * s, 3) for y, s in zip(years, shares)}
-    internal = {
-        "as_of": "2019-12",
-        "revenue": revenue,
-        "purchase": purchase,
-        "plan_snapshots": [],
-        # Only two tracked rating changes, as described in the paper.
-        "pd_history": [{"date": "2014-06-01", "pd": 0.7}, {"date": "2019-09-01", "pd": 2.0}],
-        "quality": {str(y): {"ppm": v, "otd": 0.972} for y, v in zip(years, [48, 51, 47, 50, 49, 52])},
-    }
-    # Plan volumes are calibrated so that the revenue forecast for 2020 equals the
-    # 30.28 Mio. € reported in the paper; the planning volatility is visible across plan revisions.
-    other_2019 = revenue["2019"] - purchase["2019"]
-    other_2014 = revenue["2014"] - purchase["2014"]
-    g = (other_2019 / other_2014) ** (1 / 5) - 1
-    plan_2020 = 30.28 - other_2019 * (1 + g)
-    final = {
-        "2020": round(plan_2020, 3),
-        "2021": round(plan_2020 * 1.03, 3),
-        "2022": round(plan_2020 * 1.05, 3),
-        "2023": round(plan_2020 * 1.07, 3),
-    }
-    revisions = [1.22, 1.30, 1.08, 1.25, 0.96, 1.10, 0.92, 1.0]
-    labels = ["2018-Q2", "2018-Q3", "2018-Q4", "2019-Q1", "2019-Q2", "2019-Q3", "2019-Q4", "2019-Q4"]
-    internal["plan_snapshots"] = [
-        {"date": lab, "volumes": {y: round(v * f, 3) for y, v in final.items()}}
-        for lab, f in zip(labels, revisions)
-    ]
-
-    forecast = revenue_forecast(internal)
-    # Reconstructed actuals (index values only in the paper) with deviations giving MAPE ≈ 2.4 %.
-    deviations = [-0.0297, 0.018, -0.027, 0.019]
-    actual_shares = [0.645, 0.665, 0.682, 0.70]
-    actual = []
-    for f, e, s in zip(forecast, deviations, actual_shares):
-        r = round(f["revenue"] * (1 + e), 2)
-        actual.append({"year": f["year"], "revenue": r, "customer_share": s})
-    master = {
-        "id": "S0999",
-        "number": "LF-19019",
-        "name": "Sublieferant M (Fallstudie, anonymisiert)",
-        "city": "Süddeutschland",
-        "country": "DE",
-        "website": "",
-        "commodity": COMMODITIES[0],
-        "buyer": BUYERS[0],
-        "register_status": "yellow",
-        "is_case_study": True,
-        "case_study": {
-            "description": (
-                "Rekonstruktion des Anwendungsbeispiels aus dem Paper: mittelständischer Hersteller von "
-                "Metallkomponenten mit Datenstand Ende 2019. Die Ist-Werte 2020–2023 sind im Paper nur "
-                "indexiert veröffentlicht und hier illustrativ rekonstruiert."
-            ),
-            "actual": actual,
-            "actual_pd": [
-                {"date": "2020-06-01", "pd": 2.0},
-                {"date": "2021-06-01", "pd": 3.0},
-                {"date": "2022-06-01", "pd": 4.0},
-            ],
-            "paper_table": [
-                ["Customer-Share (Abhängigkeit)", "62,8 %, kritisch markiert", "Stieg von ~63 % auf ~70 %", "Bestätigt"],
-                ["Umsatzentwicklung", "−13,12 % prognostiziert", "Eng getroffen (MAPE 2,37 %)", "Bestätigt"],
-                ["Coface-PD-Rating", "Steigendes Ausfallrisiko (0,7 % → 2 %)", "Verschlechterte sich wie prognostiziert", "Bestätigt"],
-                ["Volatilität Planvolumen", "Als volatil markiert → Planungsunsicherheit", "Volatilität nahm zu", "Bestätigt"],
-                ["Qualitätskennzahlen", "Stabil, keine Qualitätsbedenken", "Blieben stabil", "Bestätigt"],
-            ],
-        },
-    }
-    return master, internal, []
-
-
 def seed() -> None:
-    master, internal, external = _build_case_study()
-    db.upsert_supplier(master, internal, external)
     for i, (name, city, country, commodity, profile) in enumerate(SUPPLIERS):
         master, internal, external = _build_regular(i, name, city, country, commodity, profile)
         db.upsert_supplier(master, internal, external)

@@ -6,13 +6,15 @@ KPIs that feed the Decision Module.
 
 KPIs are calculated deterministically in code rather than by the LLM. Every KPI
 carries its formula, threshold and data source so that the assessment stays
-fully traceable (design target "transparency").
+fully traceable (design target "transparency"). Data sources that are missing
+for a supplier (e.g. a newly entered supplier without spend data) are skipped
+and reported in `missing_sources`.
 """
 
 from statistics import mean, pstdev
 
 # Thresholds of the standardized assessment. The 50 % customer-share limit and the
-# PD "yellow area" around 2 % follow the case study in the paper.
+# PD "yellow area" around 2 % follow the paper.
 THRESHOLDS = {
     "customer_share": {"warn": 0.30, "critical": 0.50},
     "customer_share_delta_pp": {"warn": 5.0, "critical": 10.0},
@@ -28,6 +30,7 @@ THRESHOLDS = {
 
 FORECAST_HORIZON = 4
 OTHER_BUSINESS_GROWTH_CAP = 0.05
+SOURCES = ["Spend Cube", "Demand Planning", "Risk Management (Coface)", "Quality Management"]
 
 
 def _status_high_is_bad(value: float, key: str) -> str:
@@ -60,6 +63,12 @@ def _cagr(first: float, last: float, years: int) -> float:
     return (last / first) ** (1 / years) - 1
 
 
+def _spend_years(data: dict) -> list[int]:
+    """Years for which both supplier revenue and purchasing volume are known."""
+    revenue, purchase = data.get("revenue") or {}, data.get("purchase") or {}
+    return sorted(int(y) for y in revenue if y in purchase and revenue[y])
+
+
 def revenue_forecast(data: dict) -> list[dict]:
     """Projects supplier revenue for the next years.
 
@@ -67,40 +76,38 @@ def revenue_forecast(data: dict) -> list[dict]:
             + the supplier's other business, extrapolated with its historical CAGR
               (capped at +/-5 % p.a.).
     """
-    years = sorted(int(y) for y in data["revenue"])
+    years = _spend_years(data)
+    snapshots = data.get("plan_snapshots") or []
+    if not years or not snapshots:
+        return []
     first, last = years[0], years[-1]
     other_first = data["revenue"][str(first)] - data["purchase"][str(first)]
     other_last = data["revenue"][str(last)] - data["purchase"][str(last)]
     g = max(-OTHER_BUSINESS_GROWTH_CAP, min(OTHER_BUSINESS_GROWTH_CAP, _cagr(other_first, other_last, last - first)))
-    plan = data["plan_snapshots"][-1]["volumes"]
+    plan = snapshots[-1]["volumes"]
     out = []
     for k in range(1, FORECAST_HORIZON + 1):
         y = last + k
         if str(y) not in plan:
             break
-        other = other_last * (1 + g) ** k
+        other = max(0.0, other_last * (1 + g) ** k)
         out.append(
             {
                 "year": y,
                 "revenue": round(plan[str(y)] + other, 2),
                 "purchase": round(plan[str(y)], 2),
-                "customer_share": round(plan[str(y)] / (plan[str(y)] + other), 4),
+                "customer_share": round(plan[str(y)] / (plan[str(y)] + other), 4) if plan[str(y)] + other else 0,
             }
         )
     return out
 
 
-def compute_kpis(data: dict) -> dict:
-    as_of = data["as_of"]
-    years = sorted(int(y) for y in data["revenue"])
-    last, first = years[-1], years[0]
+def _spend_kpis(data: dict, years: list[int]) -> list[dict]:
     rev = {int(y): v for y, v in data["revenue"].items()}
     pur = {int(y): v for y, v in data["purchase"].items()}
-    kpis: list[dict] = []
-
-    # --- Dependency (Spend Cube) ---------------------------------------------------
+    first, last = years[0], years[-1]
     share = pur[last] / rev[last]
-    kpis.append(
+    kpis = [
         {
             "id": "customer_share",
             "label": "Customer-Share",
@@ -112,7 +119,9 @@ def compute_kpis(data: dict) -> dict:
             "threshold": "Warnung ≥ 30 %, kritisch ≥ 50 %",
             "source": "Spend Cube",
         }
-    )
+    ]
+    if len(years) < 2:
+        return kpis
     ref = max(first, last - 3)
     delta_pp = (share - pur[ref] / rev[ref]) * 100
     kpis.append(
@@ -128,8 +137,6 @@ def compute_kpis(data: dict) -> dict:
             "source": "Spend Cube",
         }
     )
-
-    # --- Revenue development ---------------------------------------------------------
     cagr = _cagr(rev[first], rev[last], last - first)
     kpis.append(
         {
@@ -144,9 +151,19 @@ def compute_kpis(data: dict) -> dict:
             "source": "Spend Cube",
         }
     )
-    forecast = revenue_forecast(data)
+    return kpis
+
+
+def _plan_kpis(data: dict, years: list[int], forecast: list[dict]) -> list[dict]:
+    snapshots = data.get("plan_snapshots") or []
+    if not snapshots or not years:
+        return []
+    last = years[-1]
+    rev_last = data["revenue"][str(last)]
+    pur_last = data["purchase"][str(last)]
+    kpis = []
     if forecast:
-        fc_change = forecast[0]["revenue"] / rev[last] - 1
+        fc_change = forecast[0]["revenue"] / rev_last - 1
         kpis.append(
             {
                 "id": "revenue_forecast",
@@ -157,19 +174,16 @@ def compute_kpis(data: dict) -> dict:
                 "status": _status_low_is_bad(fc_change, "revenue_forecast_change"),
                 "formula": (
                     f"Planvolumen {forecast[0]['year']} + fortgeschriebenes Fremdgeschäft "
-                    f"= {forecast[0]['revenue']:.2f} Mio. € vs. {rev[last]:.2f} Mio. €"
+                    f"= {forecast[0]['revenue']:.2f} Mio. € vs. {rev_last:.2f} Mio. €"
                 ),
                 "threshold": "Warnung ≤ −5 %, kritisch ≤ −10 %",
                 "source": "Spend Cube + Demand Planning",
             }
         )
-
-    # --- Demand planning -------------------------------------------------------------
-    snapshots = data["plan_snapshots"]
     next_year = str(last + 1)
     plan_next = snapshots[-1]["volumes"].get(next_year)
-    if plan_next is not None:
-        plan_change = plan_next / pur[last] - 1
+    if plan_next is not None and pur_last:
+        plan_change = plan_next / pur_last - 1
         kpis.append(
             {
                 "id": "plan_change",
@@ -178,13 +192,13 @@ def compute_kpis(data: dict) -> dict:
                 "value": round(plan_change * 100, 1),
                 "unit": "%",
                 "status": _status_low_is_bad(plan_change, "plan_change_next"),
-                "formula": f"Plan {next_year} / Ist {last} − 1 = {plan_next:.2f} / {pur[last]:.2f}",
+                "formula": f"Plan {next_year} / Ist {last} − 1 = {plan_next:.2f} / {pur_last:.2f}",
                 "threshold": "Warnung ≤ −8 %, kritisch ≤ −15 %",
                 "source": "Demand Planning",
             }
         )
     revisions = [s["volumes"][next_year] for s in snapshots if next_year in s["volumes"]]
-    if len(revisions) >= 3:
+    if len(revisions) >= 3 and mean(revisions) > 0:
         vol = pstdev(revisions) / mean(revisions)
         kpis.append(
             {
@@ -199,11 +213,14 @@ def compute_kpis(data: dict) -> dict:
                 "source": "Demand Planning",
             }
         )
+    return kpis
 
-    # --- External credit rating (Risk Management) -----------------------------------
-    pd_hist = sorted(data["pd_history"], key=lambda p: p["date"])
+
+def _rating_kpis(pd_hist: list[dict], as_of: str) -> list[dict]:
+    if not pd_hist:
+        return []
     pd_latest = pd_hist[-1]
-    kpis.append(
+    kpis = [
         {
             "id": "pd_latest",
             "label": "Coface-Ausfallwahrscheinlichkeit (PD)",
@@ -215,7 +232,9 @@ def compute_kpis(data: dict) -> dict:
             "threshold": "Gelb ≥ 1 %, rot ≥ 3 %",
             "source": "Risk Management (Coface)",
         }
-    )
+    ]
+    if len(pd_hist) < 2:
+        return kpis
     window = [p for p in pd_hist if _months_between(p["date"], as_of) <= 48]
     base = window[0] if len(window) > 1 else pd_hist[0]
     pd_change = pd_latest["pd"] - base["pd"]
@@ -232,65 +251,97 @@ def compute_kpis(data: dict) -> dict:
             "source": "Risk Management (Coface)",
         }
     )
-    updates_48m = len(window)
-    staleness = _months_between(pd_hist[-2]["date"], pd_latest["date"]) if len(pd_hist) > 1 else 0
+    gap = max(_months_between(a["date"], b["date"]) for a, b in zip(pd_hist, pd_hist[1:]))
     kpis.append(
         {
             "id": "rating_gap",
             "label": "Längste Lücke zwischen Ratingständen",
             "group": "Rating",
-            "value": staleness,
+            "value": gap,
             "unit": "Monate",
-            "status": _status_high_is_bad(staleness, "rating_staleness_months"),
-            "formula": f"{updates_48m} Ratingstände in 48 Monaten",
+            "status": _status_high_is_bad(gap, "rating_staleness_months"),
+            "formula": f"{len(window)} Ratingstände in 48 Monaten",
             "threshold": "Warnung ≥ 12 Monate, kritisch ≥ 24 Monate",
             "source": "Risk Management (Coface)",
         }
     )
+    return kpis
 
-    # --- Quality management ----------------------------------------------------------
-    q = {int(y): v for y, v in data["quality"].items()}
+
+def _quality_kpis(quality: dict) -> list[dict]:
+    q = {int(y): v for y, v in quality.items()}
     qy = sorted(q)
-    prev = [q[y]["ppm"] for y in qy[-3:-1]]
-    ppm_change = q[qy[-1]]["ppm"] / mean(prev) - 1 if prev and mean(prev) > 0 else 0.0
-    kpis.append(
-        {
-            "id": "ppm",
-            "label": "Reklamationsquote (ppm)",
-            "group": "Qualität",
-            "value": q[qy[-1]]["ppm"],
-            "unit": "ppm",
-            "status": _status_high_is_bad(ppm_change, "ppm_change"),
-            "formula": f"Veränderung ggü. Ø Vorjahre: {ppm_change * 100:+.0f} %",
-            "threshold": "Warnung ≥ +25 %, kritisch ≥ +60 % ggü. Vorjahren",
-            "source": "Quality Management",
-        }
-    )
-    otd = q[qy[-1]]["otd"]
-    kpis.append(
-        {
-            "id": "otd",
-            "label": "Liefertreue",
-            "group": "Qualität",
-            "value": round(otd * 100, 1),
-            "unit": "%",
-            "status": _status_low_is_bad(otd, "otd_latest"),
-            "formula": f"Pünktliche Lieferungen {qy[-1]}",
-            "threshold": "Warnung ≤ 95 %, kritisch ≤ 90 %",
-            "source": "Quality Management",
-        }
-    )
+    if not qy:
+        return []
+    kpis = []
+    latest = q[qy[-1]]
+    if latest.get("ppm") is not None:
+        prev = [q[y]["ppm"] for y in qy[-3:-1] if q[y].get("ppm") is not None]
+        ppm_change = latest["ppm"] / mean(prev) - 1 if prev and mean(prev) > 0 else 0.0
+        kpis.append(
+            {
+                "id": "ppm",
+                "label": "Reklamationsquote (ppm)",
+                "group": "Qualität",
+                "value": latest["ppm"],
+                "unit": "ppm",
+                "status": _status_high_is_bad(ppm_change, "ppm_change"),
+                "formula": f"Veränderung ggü. Ø Vorjahre: {ppm_change * 100:+.0f} %" if prev else "Keine Vorjahreswerte",
+                "threshold": "Warnung ≥ +25 %, kritisch ≥ +60 % ggü. Vorjahren",
+                "source": "Quality Management",
+            }
+        )
+    if latest.get("otd") is not None:
+        kpis.append(
+            {
+                "id": "otd",
+                "label": "Liefertreue",
+                "group": "Qualität",
+                "value": round(latest["otd"] * 100, 1),
+                "unit": "%",
+                "status": _status_low_is_bad(latest["otd"], "otd_latest"),
+                "formula": f"Pünktliche Lieferungen {qy[-1]}",
+                "threshold": "Warnung ≤ 95 %, kritisch ≤ 90 %",
+                "source": "Quality Management",
+            }
+        )
+    return kpis
 
+
+def compute_kpis(data: dict) -> dict:
+    as_of = data.get("as_of") or ""
+    years = _spend_years(data)
+    pd_hist = sorted(data.get("pd_history") or [], key=lambda p: p["date"])
+    if not as_of:
+        candidates = [f"{years[-1]}-12"] if years else []
+        candidates += [p["date"][:7] for p in pd_hist[-1:]]
+        as_of = max(candidates) if candidates else ""
+    forecast = revenue_forecast(data)
+
+    kpis = (
+        (_spend_kpis(data, years) if years else [])
+        + _plan_kpis(data, years, forecast)
+        + _rating_kpis(pd_hist, as_of)
+        + _quality_kpis(data.get("quality") or {})
+    )
+    available = {k["source"].split(" + ")[0] for k in kpis} | {
+        "Demand Planning" for k in kpis if "Demand Planning" in k["source"]
+    }
+    snapshots = data.get("plan_snapshots") or []
+    next_year = str(years[-1] + 1) if years else ""
     return {
         "as_of": as_of,
         "kpis": kpis,
         "forecast": forecast,
+        "missing_sources": [s for s in SOURCES if s not in available],
         "series": {
             "years": years,
-            "revenue": [rev[y] for y in years],
-            "purchase": [pur[y] for y in years],
-            "customer_share": [round(pur[y] / rev[y] * 100, 1) for y in years],
+            "revenue": [data["revenue"][str(y)] for y in years],
+            "purchase": [data["purchase"][str(y)] for y in years],
+            "customer_share": [round(data["purchase"][str(y)] / data["revenue"][str(y)] * 100, 1) for y in years],
             "pd_history": pd_hist,
-            "plan_revisions": [{"date": s["date"], "volume": s["volumes"][next_year]} for s in snapshots if next_year in s["volumes"]],
+            "plan_revisions": [
+                {"date": s["date"], "volume": s["volumes"][next_year]} for s in snapshots if next_year in s["volumes"]
+            ],
         },
     }

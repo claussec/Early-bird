@@ -12,6 +12,7 @@ from .config import settings
 from .llm import LLM
 from .modules import decision_module as dm
 from .modules import external_module, internal_module
+from .notifiers import RiskMessage, dispatch
 
 STEPS = [
     ("internal", "Internal Module", "Interne Daten sammeln & KPIs berechnen"),
@@ -33,7 +34,11 @@ def _pause(llm: LLM, pace: bool) -> None:
         time.sleep(settings.demo_step_delay)
 
 
-def run(supplier_id: str, llm: LLM | None = None, notify: bool = True, pace: bool = True) -> Iterator[dict]:
+def run(
+    supplier_id: str, llm: LLM | None = None, channels: list[str] | None = None, pace: bool = True
+) -> Iterator[dict]:
+    """Evaluates one supplier. Escalations are delivered through `channels` (default: cockpit only)."""
+    channels = ["inapp"] if channels is None else channels
     llm = llm or LLM()
     master = db.get_supplier(supplier_id)
     if master is None:
@@ -45,7 +50,13 @@ def run(supplier_id: str, llm: LLM | None = None, notify: bool = True, pace: boo
     _pause(llm, pace)
     internal = internal_module.compute_kpis(db.get_internal(supplier_id))
     flagged = [k for k in internal["kpis"] if k["status"] != "ok"]
-    yield _event("internal", "done", f"{len(internal['kpis'])} KPIs berechnet, {len(flagged)} auffällig")
+    missing = internal["missing_sources"]
+    yield _event(
+        "internal",
+        "done",
+        f"{len(internal['kpis'])} KPIs berechnet, {len(flagged)} auffällig"
+        + (f". Keine Daten aus: {', '.join(missing)}" if missing else ""),
+    )
 
     yield _event("external", "running")
     docs, origin = external_module.collect(master, db.get_external(supplier_id))
@@ -76,6 +87,10 @@ def run(supplier_id: str, llm: LLM | None = None, notify: bool = True, pace: boo
 
     yield _event("decision", "running")
     decision, dec_method = dm.decide(master, scoring, combos, argumentation, llm)
+    if missing:
+        decision.justification += f" Datenlage unvollständig – fehlend: {', '.join(missing)}."
+        if len(missing) >= 2:
+            decision.confidence = "low"
     _pause(llm, pace)
     yield _event(
         "decision", "done",
@@ -83,20 +98,33 @@ def run(supplier_id: str, llm: LLM | None = None, notify: bool = True, pace: boo
     )
 
     yield _event("escalation", "running")
-    notification = None
-    if decision.escalate and notify:
+    deliveries: list[dict] = []
+    if decision.escalate and channels:
         buyer = master["buyer"]
-        notification = db.add_notification(
-            supplier_id,
-            f"{buyer['name']} <{buyer['email']}>",
-            f"[Frühwarnung {dm.LIGHT_DE[decision.traffic_light]}] {master['name']}",
-            f"{argumentation.summary}\n\nEmpfehlung: {argumentation.recommendation}\n\nMaßnahmen:\n"
-            + "\n".join(f"- {m}" for m in argumentation.measures),
+        message = RiskMessage(
+            supplier_id=supplier_id,
+            supplier_name=master["name"],
+            supplier_number=master["number"],
+            recipient_name=buyer["name"],
+            recipient_email=buyer["email"],
+            traffic_light=decision.traffic_light,
+            score=scoring["score"],
+            subject=f"[Frühwarnung {dm.LIGHT_DE[decision.traffic_light]}] {master['name']} ({master['number']})",
+            summary=argumentation.summary,
+            recommendation=argumentation.recommendation,
+            measures=argumentation.measures,
+            link=f"{settings.app_base_url.rstrip('/')}/?supplier={supplier_id}",
         )
-    yield _event(
-        "escalation", "done",
-        f"Einkäufer {master['buyer']['name']} benachrichtigt" if notification else "Keine Eskalation – Ergebnis gespeichert",
-    )
+        deliveries = dispatch(message, channels)
+    if deliveries:
+        sent = [d["channel"] for d in deliveries if d["status"] == "sent"]
+        failed = [d["channel"] for d in deliveries if d["status"] != "sent"]
+        summary = f"Einkäufer {master['buyer']['name']} benachrichtigt über: {', '.join(sent) or '–'}"
+        if failed:
+            summary += f" · fehlgeschlagen: {', '.join(failed)}"
+    else:
+        summary = "Keine Eskalation – Ergebnis gespeichert"
+    yield _event("escalation", "done", summary)
 
     report = {
         "supplier_id": supplier_id,
@@ -113,15 +141,16 @@ def run(supplier_id: str, llm: LLM | None = None, notify: bool = True, pace: boo
         "scoring": scoring,
         "argumentation": argumentation.model_dump(),
         "decision": decision.model_dump(),
-        "notification": notification,
+        "missing_sources": missing,
+        "deliveries": deliveries,
     }
     db.save_result(supplier_id, report)
     yield {"type": "result", "report": report}
 
 
-def run_to_completion(supplier_id: str, llm: LLM | None = None, notify: bool = True) -> dict:
+def run_to_completion(supplier_id: str, llm: LLM | None = None, channels: list[str] | None = None) -> dict:
     report = None
-    for event in run(supplier_id, llm, notify, pace=False):
+    for event in run(supplier_id, llm, channels, pace=False):
         if event["type"] == "result":
             report = event["report"]
     return report

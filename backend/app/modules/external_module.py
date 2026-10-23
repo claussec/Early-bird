@@ -137,13 +137,14 @@ def search_news(name: str, max_items: int = 10) -> list[dict]:
 
 def collect(master: dict, stored: list[dict]) -> tuple[list[dict], str]:
     """Returns the documents to analyze and a description of where they came from."""
-    if settings.crawler_enabled and not master.get("is_case_study"):
+    if settings.crawler_enabled:
         docs = crawl_website(master.get("website", "")) + search_news(master["name"])
         if docs:
             return docs, f"Live-Crawling: {len(docs)} Dokumente (Website + News)"
-    if master.get("is_case_study"):
-        return [], "Webcrawler für den historischen Zeitraum (2019) nicht verfügbar – wie im Paper"
-    return stored, f"Demo-Datenbestand: {len(stored)} vorab gesammelte Dokumente"
+        return stored, "Live-Crawling ohne Treffer – gespeicherte Dokumente verwendet"
+    if not stored:
+        return [], "Keine Web-Dokumente (Crawler deaktiviert: CRAWLER_ENABLED=false)"
+    return stored, f"Gespeicherter Datenbestand: {len(stored)} Dokumente"
 
 
 # --- Classification agent ---------------------------------------------------------------
