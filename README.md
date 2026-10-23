@@ -14,6 +14,17 @@ Das 3D-Cockpit zeigt das Werk des Abnehmers in der Mitte und die Lieferanten als
 |---|---|
 | ![Lieferant anlegen](docs/supplier-form.png) | ![Automode](docs/automode.png) |
 
+## Zwei Varianten
+
+| | Server-Version | Online-Version (claude.ai-Artefakt) |
+|---|---|---|
+| Start | `docker compose up` bzw. Python + Node | Link öffnen, keine Installation |
+| KI-Agenten | Claude-API, Ollama (offline) oder regelbasiert | Claude über das eigene claude.ai-Konto oder regelbasiert |
+| Web-Signale | Live-Crawling | Recherche-Prompt → Claude-Chat mit Websuche → Antwort einfügen |
+| SAP/ERP, Outlook, Teams, Automode | ✅ | – |
+
+Gebaut wird die Online-Version mit `cd frontend && npm run build:artifact`. Alle Unterschiede und wo sie im Code stecken stehen in [`docs/ARTIFACT_VARIANT.md`](docs/ARTIFACT_VARIANT.md).
+
 ## Vom Paper zur Software
 
 | Paper (Abbildung 2–4) | Umsetzung |

@@ -179,6 +179,11 @@ export interface Meta {
   steps: [string, string, string][]
 }
 
+/** Which build is running: the server app (REST API) or the claude.ai artifact (agents in the browser). */
+export type Target = 'server' | 'artifact'
+
+export type AgentMode = 'claude' | 'rules'
+
 export interface StepState {
   status: 'pending' | 'running' | 'done'
   summary: string

@@ -1,6 +1,6 @@
 import { Bot, Loader2, Play, Power } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { api } from '../api'
+import type { Backend } from '../backend'
 import type { Automode, Channel } from '../types'
 import { Toggle } from './ui'
 
@@ -14,7 +14,7 @@ const INTERVALS = [
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' }) : '–')
 
 /** Auto mode: evaluates all stored supplier numbers on a schedule and notifies buyers. */
-export function AutomodeControl({ onCycleFinished }: { onCycleFinished: () => void }) {
+export function AutomodeControl({ api, onCycleFinished }: { api: NonNullable<Backend['automode']>; onCycleFinished: () => void }) {
   const [state, setState] = useState<Automode | null>(null)
   const [channels, setChannels] = useState<Channel[]>([])
   const [open, setOpen] = useState(false)
@@ -24,7 +24,7 @@ export function AutomodeControl({ onCycleFinished }: { onCycleFinished: () => vo
     let wasRunning = false
     const load = async () => {
       try {
-        const s = await api.automode()
+        const s = await api.get()
         if (wasRunning && !s.running) onCycleFinished()
         wasRunning = s.running
         setState(s)
@@ -36,11 +36,11 @@ export function AutomodeControl({ onCycleFinished }: { onCycleFinished: () => vo
     api.channels().then(setChannels).catch(() => {})
     const t = setInterval(load, 5000)
     return () => clearInterval(t)
-  }, [onCycleFinished])
+  }, [api, onCycleFinished])
 
-  const update = async (changes: Parameters<typeof api.setAutomode>[0]) => {
+  const update = async (changes: Parameters<typeof api.set>[0]) => {
     try {
-      setState(await api.setAutomode(changes))
+      setState(await api.set(changes))
       setError(null)
     } catch (e) {
       setError((e as Error).message)
@@ -49,7 +49,7 @@ export function AutomodeControl({ onCycleFinished }: { onCycleFinished: () => vo
 
   const runNow = async () => {
     try {
-      await api.runAutomode()
+      await api.run()
       setState((s) => (s ? { ...s, running: true } : s))
     } catch (e) {
       setError((e as Error).message)

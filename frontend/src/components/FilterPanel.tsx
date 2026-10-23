@@ -1,6 +1,6 @@
-import { ChevronDown, Plus, Search, SlidersHorizontal, X } from 'lucide-react'
+import { ChevronDown, Globe, Plus, Search, SlidersHorizontal, Trash2, X } from 'lucide-react'
 import { useState } from 'react'
-import { STATUS, fmt } from '../theme'
+import { STATUS, fmt, fmtUnit, joinDot } from '../theme'
 import type { Filters, Light, Supplier } from '../types'
 import { Chip, StatusIcon, Toggle } from './ui'
 
@@ -15,6 +15,10 @@ interface Props {
   onSelect: (id: string) => void
   onHover: (id: string | null) => void
   onAdd: () => void
+  /** Artifact only: web research for several suppliers via a Claude chat. */
+  onBatchResearch?: () => void
+  /** Artifact only: shown while demo suppliers exist. */
+  onRemoveDemoData?: () => void
 }
 
 export const EMPTY_FILTERS: Filters = {
@@ -54,7 +58,10 @@ export function FilterPanel({
   onSelect,
   onHover,
   onAdd,
+  onBatchResearch,
+  onRemoveDemoData,
 }: Props) {
+  const [confirmDemo, setConfirmDemo] = useState(false)
   const active =
     filters.query ||
     filters.lights.length ||
@@ -210,7 +217,7 @@ export function FilterPanel({
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[13px] font-medium text-ink-1">{s.name}</span>
                 <span className="block truncate text-[11px] text-ink-3">
-                  {s.number} · {s.city} · CS {fmt(s.customer_share, 0)} % · PD {fmt(s.pd, 1)} %
+                  {joinDot(s.number, s.city, `CS ${fmtUnit(s.customer_share, '%', 0)}`, `PD ${fmtUnit(s.pd, '%', 1)}`)}
                 </span>
               </span>
               <span className="font-mono text-sm text-ink-2">{s.score}</span>
@@ -232,6 +239,43 @@ export function FilterPanel({
           </li>
         )}
       </ul>
+      {(onBatchResearch || onRemoveDemoData) && (
+        <div className={`${open ? 'flex' : 'hidden md:flex'} flex-wrap items-center gap-2 border-t border-line px-3 py-2.5`}>
+          {onBatchResearch && (
+            <button
+              onClick={onBatchResearch}
+              className="flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs text-ink-2 hover:border-accent/60 hover:text-ink-1"
+              title="Web-Signale für mehrere Lieferanten mit einem Claude-Chat holen"
+            >
+              <Globe size={13} className="text-accent" /> Sammel-Recherche
+            </button>
+          )}
+          {onRemoveDemoData &&
+            (confirmDemo ? (
+              <span className="ml-auto flex items-center gap-1 text-xs">
+                <button
+                  onClick={() => {
+                    setConfirmDemo(false)
+                    onRemoveDemoData()
+                  }}
+                  className="rounded-lg bg-crit/20 px-2 py-1 font-medium text-[#ff8a8a] hover:bg-crit/30"
+                >
+                  Alle Demo-Lieferanten löschen
+                </button>
+                <button onClick={() => setConfirmDemo(false)} className="px-1.5 py-1 text-ink-3 hover:text-ink-1">
+                  Abbrechen
+                </button>
+              </span>
+            ) : (
+              <button
+                onClick={() => setConfirmDemo(true)}
+                className="ml-auto flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-ink-3 hover:text-[#ff8a8a]"
+              >
+                <Trash2 size={13} /> Demo-Daten entfernen
+              </button>
+            ))}
+        </div>
+      )}
     </aside>
   )
 }

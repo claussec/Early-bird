@@ -16,12 +16,15 @@ import {
 import { useState } from 'react'
 import { KPI_STATUS, STATUS, fmt } from '../theme'
 import type { Meta, StepState, SupplierDetail } from '../types'
+import { backend } from '../backend'
 import { PdChart, PlanChart, RevenueChart, ShareChart } from './Charts'
+import { WebResearchPanel } from './WebResearch'
 import { ScoreGauge, Section, StatusBadge, StatusIcon } from './ui'
 
 type Tab = 'overview' | 'agents' | 'data' | 'web'
 
 const SOURCE_LABEL: Record<string, string> = { manual: 'Manuell erfasst', demo: 'Demodaten', sap: 'SAP', erp: 'ERP' }
+const WEB_LABEL = backend.webResearch ? 'Web-Recherche' : 'Web'
 
 interface Props {
   detail: SupplierDetail
@@ -31,9 +34,11 @@ interface Props {
   onRun: () => void
   onClose: () => void
   onDelete: () => void
+  /** Called after the web signals were changed (artifact). */
+  onChanged: () => void
 }
 
-export function DetailPanel({ detail, meta, steps, running, onRun, onClose, onDelete }: Props) {
+export function DetailPanel({ detail, meta, steps, running, onRun, onClose, onDelete, onChanged }: Props) {
   const [tab, setTab] = useState<Tab>('overview')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const { supplier: s, report } = detail
@@ -42,7 +47,7 @@ export function DetailPanel({ detail, meta, steps, running, onRun, onClose, onDe
     { id: 'overview', label: 'Übersicht', icon: ScrollText },
     { id: 'agents', label: 'KI-Agenten', icon: Bot },
     { id: 'data', label: 'Daten', icon: LineIcon },
-    { id: 'web', label: 'Web', icon: Globe },
+    { id: 'web', label: WEB_LABEL, icon: Globe },
   ]
   const activeTab = tab
 
@@ -106,7 +111,7 @@ export function DetailPanel({ detail, meta, steps, running, onRun, onClose, onDe
                 <div className="text-xs text-ink-3">Keine Eskalation erforderlich</div>
               )}
               <div className="text-[11px] text-ink-3">
-                Datenstand {report.as_of} · {report.llm}
+                Datenstand {report.as_of || '–'} · {report.llm}
               </div>
             </div>
           </div>
@@ -154,6 +159,8 @@ export function DetailPanel({ detail, meta, steps, running, onRun, onClose, onDe
               <p className="text-sm text-ink-3">Für diesen Lieferanten sind noch keine Zeitreihen hinterlegt.</p>
             )}
           </div>
+        ) : backend.webResearch ? (
+          <WebResearchPanel web={backend.webResearch} supplier={s} signals={report.external} onChanged={onChanged} />
         ) : (
           <Web detail={detail} />
         )}

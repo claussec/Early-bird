@@ -1,6 +1,6 @@
 import { ChevronDown, Loader2, Plus, X } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
-import { api } from '../api'
+import { backend } from '../backend'
 import { STATUS } from '../theme'
 import type { Light, Supplier, SupplierInput } from '../types'
 import { StatusIcon } from './ui'
@@ -75,7 +75,7 @@ export function SupplierForm({ commodities, onCreated, onClose }: Props) {
     }
     setSaving(true)
     try {
-      onCreated(await api.createSupplier(body))
+      onCreated(await backend.createSupplier(body))
     } catch (err) {
       setError((err as Error).message)
     } finally {

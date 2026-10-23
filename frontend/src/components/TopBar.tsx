@@ -1,6 +1,8 @@
 import { Bell, Bot, Loader2, Radar, RefreshCw } from 'lucide-react'
 import { useState } from 'react'
+import { backend } from '../backend'
 import type { Meta, Notification, Supplier } from '../types'
+import { AgentModeControl } from './AgentModeControl'
 import { AutomodeControl } from './AutomodeControl'
 import { StatusIcon } from './ui'
 
@@ -48,20 +50,22 @@ export function TopBar({ meta, suppliers, notifications, cycle, onCycle, onSelec
       </div>
 
       <div className="ml-auto flex items-center gap-2 md:gap-3">
-        {meta && (
+        {meta && !backend.agents && (
           <div className="glass hidden items-center gap-2 rounded-2xl px-3 py-2.5 text-xs text-ink-2 md:flex" title="LLM-Provider (LLM_PROVIDER)">
             <Bot size={15} className="text-accent" /> {meta.llm}
           </div>
         )}
-        <AutomodeControl onCycleFinished={onAutomodeFinished} />
+        {backend.agents && <AgentModeControl agents={backend.agents} />}
+        {backend.automode && <AutomodeControl api={backend.automode} onCycleFinished={onAutomodeFinished} />}
         <button
           onClick={onCycle}
           disabled={cycle.running}
+          title={backend.target === 'artifact' ? 'Bewertet alle Lieferanten regelbasiert (ohne Claude-Kontingent)' : undefined}
           className="glass flex items-center gap-2 rounded-2xl px-4 py-2.5 text-xs font-semibold text-ink-1 transition hover:border-accent/60 disabled:opacity-80"
         >
           {cycle.running ? <Loader2 size={15} className="spin text-accent" /> : <RefreshCw size={15} className="text-accent" />}
           <span className={cycle.running ? '' : 'hidden sm:inline'}>
-            {cycle.running ? `${cycle.done}/${cycle.total}` : 'Quartalslauf starten'}
+            {cycle.running ? `${cycle.done}/${cycle.total}` : backend.target === 'artifact' ? 'Alle prüfen' : 'Quartalslauf starten'}
           </span>
           {cycle.running && <span className="hidden sm:inline">· {cycle.current}</span>}
         </button>

@@ -25,3 +25,9 @@ export const KPI_STATUS: Record<string, Light> = { ok: 'green', warn: 'yellow', 
 
 export const fmt = (v: number | undefined | null, digits = 1) =>
   v === undefined || v === null ? '–' : v.toLocaleString('de-DE', { minimumFractionDigits: digits, maximumFractionDigits: digits })
+
+/** Value with unit, or a dash when the value is missing. */
+export const fmtUnit = (v: number | undefined | null, unit: string, digits = 1) => (v === undefined || v === null ? '–' : `${fmt(v, digits)} ${unit}`)
+
+/** Joins the non-empty parts with a middle dot. */
+export const joinDot = (...parts: (string | undefined | null)[]) => parts.filter(Boolean).join(' · ')

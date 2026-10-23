@@ -2,7 +2,7 @@ import { Edges, Html, QuadraticBezierLine } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import { useMemo, useRef } from 'react'
 import * as THREE from 'three'
-import { GLOW, STATUS, fmt } from '../theme'
+import { GLOW, STATUS, fmtUnit, joinDot } from '../theme'
 import type { Light, Supplier } from '../types'
 
 interface Props {
@@ -138,7 +138,7 @@ export function SupplierBuilding({ supplier: s, x, z, dimmed, selected, hovered,
           <div className="glass pointer-events-none w-56 rounded-xl px-3 py-2 text-xs">
             <div className="font-semibold text-ink-1">{s.name}</div>
             <div className="mt-0.5 text-ink-3">
-              {s.city} · {s.country} · {s.commodity}
+              {joinDot(s.city, s.country, s.commodity)}
             </div>
             <div className="mt-2 flex items-center gap-2">
               <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: STATUS[light].color }} />
@@ -148,9 +148,9 @@ export function SupplierBuilding({ supplier: s, x, z, dimmed, selected, hovered,
             </div>
             <div className="mt-1 grid grid-cols-2 gap-x-2 text-ink-3">
               <span>Customer-Share</span>
-              <span className="text-right text-ink-2">{fmt(s.customer_share)} %</span>
+              <span className="text-right text-ink-2">{fmtUnit(s.customer_share, '%')}</span>
               <span>PD (Coface)</span>
-              <span className="text-right text-ink-2">{fmt(s.pd, 2)} %</span>
+              <span className="text-right text-ink-2">{fmtUnit(s.pd, '%', 2)}</span>
             </div>
           </div>
         </Html>

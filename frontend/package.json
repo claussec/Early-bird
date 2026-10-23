@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:artifact": "tsc -b && vite build --mode artifact && node scripts/artifact-page.mjs",
+    "dev:artifact": "vite --mode artifact"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.6",
@@ -33,6 +35,7 @@
     "tailwindcss": "^4.1.13",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.30.1",
-    "vite": "^6.3.5"
+    "vite": "^6.3.5",
+    "vite-plugin-singlefile": "^2.3.3"
   }
 }

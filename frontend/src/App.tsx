@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, stream } from './api'
+import { backend } from './backend'
+import { BatchResearch } from './components/WebResearch'
 import { DetailPanel } from './components/DetailPanel'
 import { EMPTY_FILTERS, FilterPanel, applyFilters } from './components/FilterPanel'
 import { SupplierForm } from './components/SupplierForm'
@@ -21,16 +22,22 @@ export default function App() {
   const [cycle, setCycle] = useState({ running: false, done: 0, total: 0, current: '' })
   const [error, setError] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
+  const [showBatch, setShowBatch] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     try {
-      const [m, s, n] = await Promise.all([api.meta(), api.suppliers(), api.notifications()])
+      const [m, s, n] = await Promise.all([backend.meta(), backend.suppliers(), backend.notifications()])
       setMeta(m)
       setSuppliers(s)
       setNotifications(n)
       setError(null)
     } catch (e) {
-      setError(`Backend nicht erreichbar (${(e as Error).message}). Läuft der API-Server auf Port 8000?`)
+      setError(
+        backend.target === 'server'
+          ? `Backend nicht erreichbar (${(e as Error).message}). Läuft der API-Server auf Port 8000?`
+          : `Daten konnten nicht geladen werden (${(e as Error).message}).`,
+      )
     }
   }, [])
 
@@ -44,11 +51,33 @@ export default function App() {
       setDetail(null)
       return
     }
-    api
+    backend
       .supplier(selectedId)
       .then(setDetail)
       .catch(() => setDetail(null))
   }, [selectedId])
+
+  const selectedRef = useRef(selectedId)
+  selectedRef.current = selectedId
+  const reload = useCallback(async () => {
+    await refresh()
+    const id = selectedRef.current
+    if (id) setDetail(await backend.supplier(id).catch(() => null))
+  }, [refresh])
+
+  // Artifact: changes by other viewers (or other tabs) arrive live.
+  useEffect(() => {
+    if (!backend.subscribe) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const unsubscribe = backend.subscribe(() => {
+      clearTimeout(timer)
+      timer = setTimeout(reload, 150)
+    })
+    return () => {
+      clearTimeout(timer)
+      unsubscribe()
+    }
+  }, [reload])
 
   const visible = useMemo(() => applyFilters(suppliers, filters), [suppliers, filters])
   const visibleIds = useMemo(() => new Set(visible.map((s) => s.id)), [visible])
@@ -59,11 +88,13 @@ export default function App() {
     setRunning(true)
     setSteps(Object.fromEntries(meta.steps.map(([s]) => [s, { status: 'pending', summary: '' }])))
     try {
-      await stream(`/api/suppliers/${id}/analyze`, (e) => {
+      await backend.analyze(id, (e) => {
         if (e.type === 'step') setSteps((prev) => ({ ...prev, [e.step!]: { status: e.status!, summary: e.summary ?? '' } }))
       })
-      const [d] = await Promise.all([api.supplier(id), refresh()])
+      const [d] = await Promise.all([backend.supplier(id), refresh()])
       setDetail(d)
+    } catch (e) {
+      setNotice((e as Error).message)
     } finally {
       setRunning(false)
     }
@@ -71,9 +102,13 @@ export default function App() {
 
   const deleteSelected = async () => {
     if (!selectedId) return
-    await api.deleteSupplier(selectedId)
-    setSelectedId(null)
-    await refresh()
+    try {
+      await backend.deleteSupplier(selectedId)
+      setSelectedId(null)
+      await refresh()
+    } catch (e) {
+      setNotice((e as Error).message)
+    }
   }
 
   const onCreated = async (s: Supplier) => {
@@ -83,26 +118,30 @@ export default function App() {
     setSelectedId(s.id)
   }
 
-  const selectedRef = useRef(selectedId)
-  selectedRef.current = selectedId
-  const onAutomodeFinished = useCallback(async () => {
-    await refresh()
-    const id = selectedRef.current
-    if (id) setDetail(await api.supplier(id).catch(() => null))
-  }, [refresh])
+  const removeDemoData = async () => {
+    try {
+      await backend.storage?.removeDemoData()
+      setSelectedId(null)
+      setFilters(EMPTY_FILTERS)
+      await refresh()
+    } catch (e) {
+      setNotice((e as Error).message)
+    }
+  }
 
   const runCycle = async () => {
     setCycle({ running: true, done: 0, total: suppliers.length, current: '' })
     try {
-      await stream('/api/cycle', (e) => {
+      await backend.cycle((e) => {
         if (e.type === 'supplier') setCycle((c) => ({ ...c, current: e.name?.split(' ')[0] ?? '' }))
         if (e.type === 'supplier_done') {
           setCycle((c) => ({ ...c, done: c.done + 1 }))
           setSuppliers((list) => list.map((s) => (s.id === e.supplier_id ? { ...s, traffic_light: e.traffic_light, score: e.score } : s)))
         }
       })
-      await refresh()
-      if (selectedId) setDetail(await api.supplier(selectedId))
+      await reload()
+    } catch (e) {
+      setNotice((e as Error).message)
     } finally {
       setCycle((c) => ({ ...c, running: false }))
     }
@@ -132,10 +171,27 @@ export default function App() {
           cycle={cycle}
           onCycle={runCycle}
           onSelect={setSelectedId}
-          onAutomodeFinished={onAutomodeFinished}
+          onAutomodeFinished={reload}
         />
         {error && (
           <div className="glass pointer-events-auto self-start rounded-xl border-crit/50 px-4 py-3 text-sm text-[#ff8a8a]">{error}</div>
+        )}
+        {meta && backend.storage && !backend.storage.persistent() && (
+          <div className="glass pointer-events-auto self-start rounded-xl border-warn/40 px-4 py-2.5 text-xs text-ink-2">
+            <b className="text-ink-1">Ohne Speicher:</b> In dieser Ansicht steht der Speicher des Artefakts nicht zur Verfügung (z. B. nicht
+            angemeldet). Änderungen gelten nur bis zum Neuladen.
+          </div>
+        )}
+        {notice && (
+          <div
+            role="alert"
+            className="glass pointer-events-auto flex items-start gap-3 self-center rounded-xl border-crit/50 px-4 py-2.5 text-sm text-[#ff8a8a]"
+          >
+            {notice}
+            <button onClick={() => setNotice(null)} className="text-xs text-ink-3 hover:text-ink-1">
+              Schließen
+            </button>
+          </div>
         )}
         <div className="flex min-h-0 flex-1 flex-col items-stretch justify-between gap-3 md:flex-row md:gap-4">
           {meta && (
@@ -151,6 +207,8 @@ export default function App() {
                 onSelect={setSelectedId}
                 onHover={setHoveredId}
                 onAdd={() => setShowForm(true)}
+                onBatchResearch={backend.webResearch ? () => setShowBatch(true) : undefined}
+                onRemoveDemoData={backend.storage?.hasDemoData() ? removeDemoData : undefined}
               />
             </div>
           )}
@@ -164,6 +222,7 @@ export default function App() {
               onRun={runAnalysis}
               onClose={() => setSelectedId(null)}
               onDelete={deleteSelected}
+              onChanged={reload}
             />
           )}
         </div>
@@ -172,6 +231,17 @@ export default function App() {
         </div>
       </div>
       {showForm && meta && <SupplierForm commodities={meta.commodities} onCreated={onCreated} onClose={() => setShowForm(false)} />}
+      {showBatch && backend.webResearch && (
+        <BatchResearch
+          web={backend.webResearch}
+          suppliers={visible}
+          onDone={async () => {
+            setShowBatch(false)
+            await reload()
+          }}
+          onClose={() => setShowBatch(false)}
+        />
+      )}
     </div>
   )
 }

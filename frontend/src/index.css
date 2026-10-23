@@ -16,6 +16,10 @@
   --color-crit: #d03b3b;
 }
 
+:root {
+  color-scheme: dark;
+}
+
 html,
 body,
 #root {
