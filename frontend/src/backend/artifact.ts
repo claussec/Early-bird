@@ -214,7 +214,8 @@ function askJson(): AskJson | null {
 const provisional = new Map<string, { key: string; report: Report }>()
 async function reportFor(id: string): Promise<Report | null> {
   const stored = results.get(id)?.report
-  if (stored) return stored
+  // Results stored by the first artifact version (with a numeric score) are recomputed.
+  if (stored?.risk_check) return stored
   const doc = suppliers.get(id)
   if (!doc) return null
   const key = JSON.stringify(doc)
@@ -235,22 +236,16 @@ async function evaluate(id: string, opts: { ai: AskJson | null; onEvent?: (e: St
     { supplier: doc.master, internal: doc.internal, external: doc.external ?? [] },
     { ai: opts.ai, aiLabel: AI_LABEL, onEvent: opts.onEvent, pace: opts.pace },
   )
-  const prev = results.get(id)?.history ?? []
-  const entry = {
-    created_at: report.created_at,
-    score: report.scoring.score,
-    traffic_light: report.decision.traffic_light,
-    llm: report.llm,
-  }
+  const prev = (results.get(id)?.history ?? []).filter((h) => h.status)
+  const entry = { created_at: report.created_at, status: report.status, llm: report.llm }
   await writeResult(id, { report, history: [...prev, entry].slice(-HISTORY) })
   if (report.decision.escalate) {
     const s = doc.master
-    const light = { green: 'Grün', yellow: 'Gelb', red: 'Rot' }[report.decision.traffic_light]
     await addNotification({
       supplier_id: id,
       created_at: report.created_at,
       recipient: s.buyer.name ? `${s.buyer.name}${s.buyer.email ? ` <${s.buyer.email}>` : ''}` : 'Einkauf',
-      subject: `[Frühwarnung ${light}] ${s.name} (${s.number})`,
+      subject: `[Frühwarnung] ${s.name} (${s.number})`,
       body: `${report.argumentation.summary}\n\nEmpfehlung: ${report.argumentation.recommendation}`,
       channel: 'inapp',
       status: 'sent',
@@ -268,9 +263,10 @@ function summary(master: Supplier, report: Report | null): Supplier {
   const series = report.series
   return {
     ...master,
-    score: report.scoring.score,
-    traffic_light: report.decision.traffic_light,
+    status: report.status,
     escalate: report.decision.escalate,
+    risk_indicators: report.indicators.filter((i) => i.type === 'risk').length,
+    recommendation: report.argumentation.recommendation,
     assessed_at: report.created_at,
     as_of: report.as_of,
     customer_share: kpi.customer_share?.value ?? null,
@@ -377,7 +373,7 @@ export const artifactBackend: Backend = {
     const doc = suppliers.get(id)
     if (!doc) throw new Error('Lieferant nicht gefunden')
     const report = await reportFor(id)
-    return { supplier: summary(doc.master, report), report, history: results.get(id)?.history ?? [] }
+    return { supplier: summary(doc.master, report), report, history: (results.get(id)?.history ?? []).filter((h) => h.status) }
   },
 
   async notifications() {
@@ -427,7 +423,7 @@ export const artifactBackend: Backend = {
         if (!doc) continue
         onEvent({ type: 'supplier', supplier_id: id, name: doc.master.name })
         const report = await evaluate(id, { ai: null })
-        onEvent({ type: 'supplier_done', supplier_id: id, traffic_light: report.decision.traffic_light, score: report.scoring.score })
+        onEvent({ type: 'supplier_done', supplier_id: id, status: report.status })
       }
       onEvent({ type: 'cycle_done' })
     }),

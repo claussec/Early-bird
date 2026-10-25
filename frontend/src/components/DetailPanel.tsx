@@ -14,12 +14,12 @@ import {
   X,
 } from 'lucide-react'
 import { useState } from 'react'
-import { KPI_STATUS, STATUS, fmt } from '../theme'
+import { KPI_STATUS, STATUS } from '../theme'
 import type { Meta, StepState, SupplierDetail } from '../types'
 import { backend } from '../backend'
 import { PdChart, PlanChart, RevenueChart, ShareChart } from './Charts'
 import { WebResearchPanel } from './WebResearch'
-import { ScoreGauge, Section, StatusBadge, StatusIcon } from './ui'
+import { RiskBadge, Section, StatusBadge, StatusIcon } from './ui'
 
 type Tab = 'overview' | 'agents' | 'data' | 'web'
 
@@ -42,7 +42,6 @@ export function DetailPanel({ detail, meta, steps, running, onRun, onClose, onDe
   const [tab, setTab] = useState<Tab>('overview')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const { supplier: s, report } = detail
-  const light = report?.decision.traffic_light ?? 'green'
   const tabs: { id: Tab; label: string; icon: typeof Bot }[] = [
     { id: 'overview', label: 'Übersicht', icon: ScrollText },
     { id: 'agents', label: 'KI-Agenten', icon: Bot },
@@ -97,23 +96,33 @@ export function DetailPanel({ detail, meta, steps, running, onRun, onClose, onDe
         </div>
 
         {report && (
-          <div className="mt-4 flex items-center gap-4">
-            <ScoreGauge score={report.scoring.score} light={light} />
-            <div className="min-w-0 flex-1 space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <StatusBadge light={light}>KI: {STATUS[light].label}</StatusBadge>
-                <span className="text-[11px] text-ink-3">Register:</span>
-                <StatusBadge light={s.register_status} size="sm" />
-              </div>
-              {report.decision.escalate ? (
-                <div className="text-xs font-medium text-[#ff8a8a]">Eskaliert an {s.buyer.name || 'Einkäufer'}</div>
-              ) : (
-                <div className="text-xs text-ink-3">Keine Eskalation erforderlich</div>
-              )}
-              <div className="text-[11px] text-ink-3">
-                Datenstand {report.as_of || '–'} · {report.llm}
-              </div>
+          <div className="mt-4 space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              <DecisionTile
+                question="Risk?"
+                agent="AI Agent Internal Data"
+                yes={report.risk_check.risk}
+                light={report.risk_check.risk ? 'yellow' : 'green'}
+              />
+              <DecisionTile
+                question="Escalation?"
+                agent="AI Agent Decision Maker"
+                yes={report.decision.escalate}
+                light={report.decision.escalate ? 'red' : 'green'}
+                pending={!report.risk_check.risk}
+              />
             </div>
+            <div className="flex flex-wrap items-center gap-2 text-[11px] text-ink-3">
+              <RiskBadge status={report.status} size="sm" />
+              <span>Risikoregister:</span>
+              <StatusBadge light={s.register_status} size="sm" />
+              <span className="basis-full">
+                Datenstand {report.as_of || '–'} · {report.llm}
+              </span>
+            </div>
+            {report.decision.escalate && (
+              <div className="text-xs font-medium text-[#ff8a8a]">Eskaliert an {s.buyer.name || 'den Einkäufer'}</div>
+            )}
           </div>
         )}
 
@@ -169,6 +178,70 @@ export function DetailPanel({ detail, meta, steps, running, onRun, onClose, onDe
   )
 }
 
+function DecisionTile({
+  question,
+  agent,
+  yes,
+  light,
+  pending,
+}: {
+  question: string
+  agent: string
+  yes: boolean
+  light: 'green' | 'yellow' | 'red'
+  pending?: boolean
+}) {
+  return (
+    <div className="rounded-xl border border-line bg-surface-0/50 p-3">
+      <div className="text-[11px] text-ink-3">{agent}</div>
+      <div className="mt-1 flex items-center gap-2">
+        <span className="font-mono text-sm text-ink-2">{question}</span>
+        {pending ? (
+          <span className="text-sm text-ink-3">nicht erforderlich</span>
+        ) : (
+          <span className="flex items-center gap-1.5 text-sm font-semibold text-ink-1">
+            <StatusIcon light={light} size={15} /> {yes ? 'Ja' : 'Nein'}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ArgumentChain({ report }: { report: NonNullable<SupplierDetail['report']> }) {
+  const byId = Object.fromEntries(report.indicators.map((i) => [i.id, i]))
+  if (!report.argumentation.arguments.length) return <p className="text-xs text-ink-3">{report.argumentation.summary}</p>
+  return (
+    <div className="space-y-2">
+      {report.argumentation.arguments.map((a, i) => (
+        <div
+          key={i}
+          className="rounded-xl border bg-surface-0/50 p-3"
+          style={{ borderColor: a.direction === 'risk' ? '#d03b3b55' : '#0ca30c55' }}
+        >
+          <div className="flex items-center gap-2 text-[13px] font-medium text-ink-1">
+            {a.direction === 'risk' ? (
+              <ArrowUpRight size={15} color={STATUS.red.color} />
+            ) : (
+              <ArrowDownRight size={15} color={STATUS.green.color} />
+            )}
+            {a.title}
+            <span className="ml-auto shrink-0 text-[10px] font-normal text-ink-3">{a.direction === 'risk' ? 'Risiko' : 'Stabilität'}</span>
+          </div>
+          <p className="mt-1.5 text-xs leading-relaxed text-ink-2">{a.reasoning}</p>
+          <div className="mt-2 flex flex-wrap gap-1">
+            {a.indicator_ids.map((id) => (
+              <span key={id} className="rounded-md bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-ink-3" title={byId[id]?.evidence}>
+                {byId[id]?.group === 'Extern' ? `Web: ${byId[id]?.category}` : (byId[id]?.label ?? id)}
+              </span>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function Overview({ detail }: { detail: SupplierDetail }) {
   const r = detail.report!
   return (
@@ -181,22 +254,42 @@ function Overview({ detail }: { detail: SupplierDetail }) {
       )}
       <Section title="Empfehlung">
         <p className="text-sm leading-relaxed text-ink-1">{r.argumentation.recommendation}</p>
-        <p className="mt-2 text-xs leading-relaxed text-ink-3">{r.argumentation.summary}</p>
+        {r.risk_check.risk && <p className="mt-2 text-xs leading-relaxed text-ink-3">{r.argumentation.summary}</p>}
       </Section>
-      <Section title="Maßnahmen">
-        <ul className="space-y-1.5">
-          {r.argumentation.measures.map((m) => (
-            <li key={m} className="flex gap-2 text-sm text-ink-2">
-              <CheckCircle2 size={15} className="mt-0.5 shrink-0 text-accent" /> {m}
-            </li>
-          ))}
-        </ul>
-      </Section>
+      {r.risk_check.risk ? (
+        <Section title="Argumentationskette">
+          <ArgumentChain report={r} />
+        </Section>
+      ) : (
+        <Section title="Begründung (Risk? = nein)">
+          <p className="text-xs leading-relaxed text-ink-2">{r.risk_check.reasoning}</p>
+        </Section>
+      )}
+      {r.risk_check.risk && (
+        <Section title={`Entscheidung: Escalation? ${r.decision.escalate ? 'Ja' : 'Nein'}`}>
+          <p className="text-xs leading-relaxed text-ink-2">{r.decision.justification}</p>
+        </Section>
+      )}
+      {r.argumentation.measures.length > 0 && (
+        <Section title="Maßnahmen">
+          <ul className="space-y-1.5">
+            {r.argumentation.measures.map((m) => (
+              <li key={m} className="flex gap-2 text-sm text-ink-2">
+                <CheckCircle2 size={15} className="mt-0.5 shrink-0 text-accent" /> {m}
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
       <Section title="Kennzahlen (Internal Module)">
         {!r.kpis.length && <p className="text-xs text-ink-3">Keine Kennzahlen hinterlegt.</p>}
         <div className="grid grid-cols-2 gap-2">
           {r.kpis.map((k) => (
-            <div key={k.id} className="group relative rounded-xl border border-line bg-surface-0/50 p-3" title={`${k.formula}\nSchwelle: ${k.threshold}\nQuelle: ${k.source}`}>
+            <div
+              key={k.id}
+              className="group relative rounded-xl border border-line bg-surface-0/50 p-3"
+              title={`${k.formula}\nSchwelle: ${k.threshold}\nQuelle: ${k.source}`}
+            >
               <div className="flex items-start justify-between gap-2">
                 <span className="text-[11px] leading-tight text-ink-3">{k.label}</span>
                 <StatusIcon light={KPI_STATUS[k.status]} size={13} />
@@ -204,7 +297,7 @@ function Overview({ detail }: { detail: SupplierDetail }) {
               <div className="mt-1.5 font-mono text-lg font-semibold text-ink-1">
                 {k.value.toLocaleString('de-DE')} <span className="text-xs font-normal text-ink-3">{k.unit}</span>
               </div>
-              <div className="mt-0.5 truncate text-[10px] text-ink-3">{k.source}</div>
+              <div className="mt-0.5 truncate text-[10px] text-ink-3">{k.threshold}</div>
             </div>
           ))}
         </div>
@@ -223,7 +316,13 @@ function PipelineMini({ steps, meta }: { steps: Record<string, StepState> | null
           <div key={id} className="flex-1" title={`${label}: ${steps[id]?.summary ?? ''}`}>
             <div
               className={`h-1.5 rounded-full transition ${
-                steps[id]?.status === 'done' ? 'bg-accent' : steps[id]?.status === 'running' ? 'animate-pulse bg-accent/60' : 'bg-line'
+                steps[id]?.status === 'done'
+                  ? 'bg-accent'
+                  : steps[id]?.status === 'running'
+                    ? 'animate-pulse bg-accent/60'
+                    : steps[id]?.status === 'skipped'
+                      ? 'bg-ink-3/30'
+                      : 'bg-line'
               }`}
             />
           </div>
@@ -238,14 +337,15 @@ function PipelineMini({ steps, meta }: { steps: Record<string, StepState> | null
 
 function Agents({ detail, steps, meta }: { detail: SupplierDetail; steps: Record<string, StepState> | null; meta: Meta }) {
   const r = detail.report!
-  const byId = Object.fromEntries(r.indicators.map((i) => [i.id, i]))
+  // Without a live run, steps after "Risk?" count as skipped when no risk was found (Figure 2).
+  const skippedWithoutRisk = (id: string) => !r.risk_check.risk && !['internal', 'risk'].includes(id)
   return (
     <>
       <Section title="Workflow (Reference Model)">
         <ol className="relative space-y-0">
           {meta.steps.map(([id, label, desc], i) => {
             const st = steps?.[id]
-            const status = st?.status ?? 'done'
+            const status = st?.status ?? (skippedWithoutRisk(id) ? 'skipped' : 'done')
             return (
               <li key={id} className="relative flex gap-3 pb-3">
                 {i < meta.steps.length - 1 && <span className="absolute left-[11px] top-6 h-full w-px bg-line" />}
@@ -258,11 +358,13 @@ function Agents({ detail, steps, meta }: { detail: SupplierDetail; steps: Record
                         : 'border-line text-ink-3'
                   }`}
                 >
-                  {status === 'running' ? <Loader2 size={12} className="spin" /> : i + 1}
+                  {status === 'running' ? <Loader2 size={12} className="spin" /> : status === 'skipped' ? '–' : i + 1}
                 </span>
-                <div className="min-w-0">
+                <div className={`min-w-0 ${status === 'skipped' ? 'opacity-50' : ''}`}>
                   <div className="text-[13px] font-medium text-ink-1">{label}</div>
-                  <div className="text-[11px] text-ink-3">{st?.summary || desc}</div>
+                  <div className="text-[11px] text-ink-3">
+                    {st?.summary || (status === 'skipped' ? 'Nicht erforderlich (Risk? = nein)' : desc)}
+                  </div>
                 </div>
               </li>
             )
@@ -270,67 +372,60 @@ function Agents({ detail, steps, meta }: { detail: SupplierDetail; steps: Record
         </ol>
       </Section>
 
-      <Section title="Argumentationskette">
-        <div className="space-y-2">
-          {r.argumentation.arguments.map((a, i) => (
-            <div
-              key={i}
-              className="rounded-xl border bg-surface-0/50 p-3"
-              style={{ borderColor: a.direction === 'risk' ? '#d03b3b55' : '#0ca30c55' }}
-            >
-              <div className="flex items-center gap-2 text-[13px] font-medium text-ink-1">
-                {a.direction === 'risk' ? <ArrowUpRight size={15} color={STATUS.red.color} /> : <ArrowDownRight size={15} color={STATUS.green.color} />}
-                {a.title}
-                <span className="ml-auto text-[10px] font-normal text-ink-3">{a.direction === 'risk' ? 'Risiko' : 'Stabilität'}</span>
-              </div>
-              <p className="mt-1.5 text-xs leading-relaxed text-ink-2">{a.reasoning}</p>
-              <div className="mt-2 flex flex-wrap gap-1">
-                {a.indicator_ids.map((id) => (
-                  <span key={id} className="rounded-md bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-ink-3" title={byId[id]?.evidence}>
-                    {byId[id]?.group === 'Extern' ? `Web: ${byId[id]?.category}` : (byId[id]?.label ?? id)}
-                  </span>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
+      <Section title={`Risk? ${r.risk_check.risk ? 'Ja' : 'Nein'} (${r.risk_check.method})`}>
+        <p className="text-xs leading-relaxed text-ink-2">{r.risk_check.reasoning}</p>
       </Section>
 
-      <Section title="Entscheidung">
-        <p className="text-xs leading-relaxed text-ink-2">{r.decision.justification}</p>
-        <p className="mt-2 rounded-lg bg-white/5 p-2 font-mono text-[11px] text-ink-3">{r.scoring.formula}</p>
-      </Section>
-
-      <Section title="Indikator-Matrix">
-        <table className="w-full text-left text-[11px]">
-          <thead className="text-ink-3">
-            <tr>
-              <th className="py-1 font-medium">Indikator</th>
-              <th className="py-1 font-medium">Typ</th>
-              <th className="py-1 text-right font-medium">Gewicht</th>
-              <th className="py-1 text-right font-medium">Punkte</th>
-            </tr>
-          </thead>
-          <tbody>
-            {r.indicators.map((i) => (
-              <tr key={i.id} className="border-t border-line/60" title={i.evidence}>
-                <td className="max-w-[220px] truncate py-1.5 pr-2 text-ink-2">{i.label}</td>
-                <td className="py-1.5">
-                  {i.type === 'risk' ? (
-                    <span className="text-[#ff8a8a]">Risiko</span>
-                  ) : i.type === 'success' ? (
-                    <span className="text-[#5fd35f]">Erfolg</span>
-                  ) : (
-                    <span className="text-ink-3">neutral</span>
-                  )}
-                </td>
-                <td className="py-1.5 text-right font-mono text-ink-3">{fmt(i.weight, 2)}</td>
-                <td className="py-1.5 text-right font-mono text-ink-1">{fmt(i.points, 2)}</td>
-              </tr>
+      {r.combinations.length > 0 && (
+        <Section title="Cross-Referencing: Kombinationen">
+          <ul className="space-y-1.5">
+            {r.combinations.map((c) => (
+              <li key={c.id} className="text-xs leading-relaxed text-ink-2">
+                <b className="text-ink-1">{c.title}:</b> {c.description}
+              </li>
             ))}
-          </tbody>
-        </table>
-      </Section>
+          </ul>
+        </Section>
+      )}
+
+      {r.indicators.length > 0 && (
+        <Section title="Indikator-Matrix (Mapping Indicators)">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-[11px]">
+              <thead className="text-ink-3">
+                <tr>
+                  <th className="py-1 font-medium">Indikator</th>
+                  <th className="py-1 font-medium">Typ</th>
+                  <th className="py-1 font-medium">Ausprägung</th>
+                  <th className="py-1 font-medium">Priorität</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...r.indicators]
+                  .sort((a, b) => ['risk', 'success', 'neutral'].indexOf(a.type) - ['risk', 'success', 'neutral'].indexOf(b.type))
+                  .map((i) => (
+                    <tr key={i.id} className="border-t border-line/60" title={i.evidence}>
+                      <td className="max-w-[200px] truncate py-1.5 pr-2 text-ink-2">
+                        {i.label} <span className="text-ink-3">{i.group !== 'Extern' ? i.value : ''}</span>
+                      </td>
+                      <td className="py-1.5">
+                        {i.type === 'risk' ? (
+                          <span className="text-[#ff8a8a]">Risiko</span>
+                        ) : i.type === 'success' ? (
+                          <span className="text-[#5fd35f]">Erfolg</span>
+                        ) : (
+                          <span className="text-ink-3">neutral</span>
+                        )}
+                      </td>
+                      <td className="py-1.5 text-ink-3">{i.type === 'risk' ? (i.strength === 'strong' ? 'deutlich' : 'schwach') : '–'}</td>
+                      <td className="py-1.5 text-ink-3">{i.priority}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </Section>
+      )}
     </>
   )
 }

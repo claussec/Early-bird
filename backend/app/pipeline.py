@@ -16,11 +16,12 @@ from .notifiers import RiskMessage, dispatch
 
 STEPS = [
     ("internal", "Internal Module", "Interne Daten sammeln & KPIs berechnen"),
+    ("risk", "Risk?", "AI Agent Internal Data: liegt ein Risiko vor?"),
     ("external", "External Module", "Web-Crawling & Klassifikation"),
     ("mapping", "Mapping Indicators", "Datenpunkte → Risiko-/Erfolgsindikatoren"),
     ("crossref", "Cross-Referencing", "Indikatoren relativieren & kombinieren"),
     ("argumentation", "Argumentation Generation", "Nachvollziehbare Argumentationskette"),
-    ("decision", "AI Decision Making", "Ampel & Eskalationsentscheidung"),
+    ("decision", "AI Decision Making", "Escalation? und Empfehlung"),
     ("escalation", "Escalation", "Benachrichtigung des Einkäufers"),
 ]
 
@@ -58,6 +59,30 @@ def run(
         + (f". Keine Daten aus: {', '.join(missing)}" if missing else ""),
     )
 
+    yield _event("risk", "running")
+    check, risk_method = internal_module.risk_check(master, internal["kpis"], llm)
+    _pause(llm, pace)
+    yield _event("risk", "done", f"{'Ja' if check.risk else 'Nein'} – {check.reasoning} ({risk_method})")
+
+    if not check.risk:
+        # Figure 2: no risk → "Risk Evaluation next quarter"; the Decision Module is not needed.
+        for step in ("external", "mapping", "crossref", "argumentation", "decision", "escalation"):
+            yield _event(step, "skipped", "Nicht erforderlich (Risk? = nein)")
+        report = _report(
+            supplier_id, llm, internal, check, risk_method, [], "Nicht ausgewertet (Risk? = nein)", [], [],
+            dm.Argumentation(
+                summary=check.reasoning,
+                arguments=[],
+                recommendation="Keine Maßnahme erforderlich – Risikobewertung im nächsten Quartal.",
+                measures=[],
+            ),
+            dm.Decision(escalate=False, confidence="medium", justification="Keine Eskalation, da kein Risiko vorliegt (Risk? = nein)."),
+            [],
+        )
+        db.save_result(supplier_id, report)
+        yield {"type": "result", "report": report}
+        return
+
     yield _event("external", "running")
     docs, origin = external_module.collect(master, db.get_external(supplier_id))
     classified, method = external_module.classify(master, docs, llm)
@@ -74,28 +99,22 @@ def run(
     yield _event("crossref", "running")
     _pause(llm, pace)
     combos = dm.cross_reference(indicators)
-    scoring = dm.score(indicators, combos)
-    yield _event(
-        "crossref", "done",
-        f"{len(combos)} kritische Kombination(en), Score {scoring['score']}/100",
-    )
+    n_fin = sum(1 for i in indicators if i["type"] == "risk" and i["priority"] == "finanziell")
+    yield _event("crossref", "done", f"{len(combos)} kritische Kombination(en), {n_fin} finanzielle Risikoindikator(en) priorisiert")
 
     yield _event("argumentation", "running")
-    argumentation, arg_method = dm.generate_argumentation(master, indicators, combos, scoring, llm)
+    argumentation, arg_method = dm.generate_argumentation(master, indicators, combos, llm)
     _pause(llm, pace)
     yield _event("argumentation", "done", f"{len(argumentation.arguments)} Argumente ({arg_method})")
 
     yield _event("decision", "running")
-    decision, dec_method = dm.decide(master, scoring, combos, argumentation, llm)
+    decision, dec_method = dm.decide(master, indicators, combos, argumentation, llm)
     if missing:
         decision.justification += f" Datenlage unvollständig – fehlend: {', '.join(missing)}."
         if len(missing) >= 2:
             decision.confidence = "low"
     _pause(llm, pace)
-    yield _event(
-        "decision", "done",
-        f"Ampel {dm.LIGHT_DE[decision.traffic_light]}, Eskalation: {'ja' if decision.escalate else 'nein'} ({dec_method})",
-    )
+    yield _event("decision", "done", f"Escalation? {'Ja' if decision.escalate else 'Nein'} ({dec_method})")
 
     yield _event("escalation", "running")
     deliveries: list[dict] = []
@@ -107,9 +126,7 @@ def run(
             supplier_number=master["number"],
             recipient_name=buyer["name"],
             recipient_email=buyer["email"],
-            traffic_light=decision.traffic_light,
-            score=scoring["score"],
-            subject=f"[Frühwarnung {dm.LIGHT_DE[decision.traffic_light]}] {master['name']} ({master['number']})",
+            subject=f"[Frühwarnung] {master['name']} ({master['number']})",
             summary=argumentation.summary,
             recommendation=argumentation.recommendation,
             measures=argumentation.measures,
@@ -126,26 +143,36 @@ def run(
         summary = "Keine Eskalation – Ergebnis gespeichert"
     yield _event("escalation", "done", summary)
 
-    report = {
+    report = _report(
+        supplier_id, llm, internal, check, risk_method, classified, origin, indicators, combos, argumentation, decision, deliveries
+    )
+    db.save_result(supplier_id, report)
+    yield {"type": "result", "report": report}
+
+
+def _report(
+    supplier_id, llm, internal, check, risk_method, external, origin, indicators, combos, argumentation, decision, deliveries
+) -> dict:
+    status = "escalated" if decision.escalate else ("risk" if check.risk else "none")
+    return {
         "supplier_id": supplier_id,
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "llm": llm.label,
         "as_of": internal["as_of"],
+        "status": status,
         "kpis": internal["kpis"],
         "forecast": internal["forecast"],
         "series": internal["series"],
-        "external": classified,
+        "risk_check": {**check.model_dump(), "method": risk_method},
+        "external": external,
         "external_origin": origin,
         "indicators": indicators,
         "combinations": combos,
-        "scoring": scoring,
         "argumentation": argumentation.model_dump(),
         "decision": decision.model_dump(),
-        "missing_sources": missing,
+        "missing_sources": internal["missing_sources"],
         "deliveries": deliveries,
     }
-    db.save_result(supplier_id, report)
-    yield {"type": "result", "report": report}
 
 
 def run_to_completion(supplier_id: str, llm: LLM | None = None, channels: list[str] | None = None) -> dict:

@@ -13,8 +13,6 @@ class RiskMessage(BaseModel):
     supplier_number: str
     recipient_name: str
     recipient_email: str
-    traffic_light: str
-    score: int
     subject: str
     summary: str
     recommendation: str

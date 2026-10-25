@@ -32,7 +32,7 @@ def test_create_supplier_with_master_data_only(client):
     s = r.json()
     assert s["country"] == "DE"
     assert s["source"] == "manual"
-    assert s["traffic_light"] == "green"
+    assert s["status"] == "none"
     assert len(s["missing_sources"]) == 4
 
     assert client.post("/api/suppliers", json=SUPPLIER).status_code == 409
@@ -58,8 +58,9 @@ def test_create_supplier_with_figures_is_assessed(client):
     assert r.status_code == 201, r.text
     s = r.json()
     assert s["customer_share"] == pytest.approx(59.3, abs=0.1)
-    assert s["traffic_light"] == "red"
+    assert s["status"] == "escalated"
     assert s["escalate"] is True
+    assert "score" not in s
     assert s["missing_sources"] == []
 
     detail = client.get(f"/api/suppliers/{s['id']}").json()

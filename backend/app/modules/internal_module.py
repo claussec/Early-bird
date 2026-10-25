@@ -13,6 +13,10 @@ and reported in `missing_sources`.
 
 from statistics import mean, pstdev
 
+from pydantic import BaseModel
+
+from ..llm import LLM, LLMUnavailable
+
 # Thresholds of the standardized assessment. The 50 % customer-share limit and the
 # PD "yellow area" around 2 % follow the paper.
 THRESHOLDS = {
@@ -345,3 +349,49 @@ def compute_kpis(data: dict) -> dict:
             ],
         },
     }
+
+
+# --- AI Agent "Internal Data": decision "Risk?" (Figure 2) --------------------------------
+
+
+class RiskCheck(BaseModel):
+    risk: bool
+    reasoning: str
+
+
+SYSTEM_RISK = (
+    "Du bist der AI Agent 'Internal Data' eines Frühwarnsystems für finanziell kritische Lieferanten im "
+    "Automotive-Einkauf. Du erhältst die aus internen Systemen berechneten Kennzahlen eines Lieferanten mit "
+    "Formel, Schwelle und Quelle. Entscheide, ob Hinweise auf ein finanzielles Risiko vorliegen (risk = true), "
+    "sodass der Lieferant im Decision Module vertieft analysiert wird, oder ob er erst im nächsten Quartal "
+    "erneut bewertet wird (risk = false). Begründe kurz und sachlich auf Deutsch mit den konkreten Kennzahlen. "
+    "Erfinde keine Werte und vergib keinen Score."
+)
+
+
+def rule_risk_check(kpis: list[dict]) -> RiskCheck:
+    flagged = [k for k in kpis if k["status"] != "ok"]
+    if not kpis:
+        return RiskCheck(risk=False, reasoning="Keine internen Kennzahlen vorhanden – Neubewertung im nächsten Quartal.")
+    if not flagged:
+        return RiskCheck(
+            risk=False,
+            reasoning="Alle Kennzahlen liegen innerhalb ihrer Schwellen – Neubewertung im nächsten Quartal.",
+        )
+    listed = "; ".join(f"{k['label']} {k['value']} {k['unit']} (Schwelle: {k['threshold']})" for k in flagged[:5])
+    return RiskCheck(risk=True, reasoning=f"{len(flagged)} Kennzahl(en) über ihrer Schwelle: {listed}.")
+
+
+def risk_check(master: dict, kpis: list[dict], llm: LLM) -> tuple[RiskCheck, str]:
+    """The Internal Module's AI agent decides whether the supplier goes into the Decision Module."""
+    if not kpis:
+        return rule_risk_check(kpis), "Regelbasiert"
+    try:
+        listing = "\n".join(
+            f"- {k['label']}: {k['value']} {k['unit']} – {k['formula']} (Schwelle: {k['threshold']}; Quelle: {k['source']})"
+            for k in kpis
+        )
+        prompt = f"Lieferant: {master['name']} ({master['commodity']}).\n\nKennzahlen:\n{listing}"
+        return llm.structured(SYSTEM_RISK, prompt, RiskCheck), llm.label
+    except LLMUnavailable:
+        return rule_risk_check(kpis), "Regelbasiert"

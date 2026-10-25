@@ -14,14 +14,14 @@ Die Oberfläche spricht in beiden Fällen nur mit dem gemeinsamen Interface `src
 
 - **3D-Cockpit**, Suche nach Name und Lieferantennummer, alle Filter, Detailansicht, Charts, Indikator-Matrix
 - **Lieferanten anlegen und löschen** mit demselben Formular und denselben Pflichtfeldern
-- **Bewertungslogik:** KPIs, Schwellenwerte, Gewichte, Kombinationen, Score und Ampel. In `src/engine/` als TypeScript-Port der Python-Module, gegen das Backend geprüft: 16/16 Demo-Lieferanten liefern denselben Score und dieselbe Ampel.
-- **Prompts der KI-Agenten** (Argumentation, Entscheidung) und die Leitplanke „höchstens eine Ampelstufe Abweichung“
+- **Bewertungslogik nach dem Paper:** KPIs, Schwellen, „Risk?“, Indikator-Matrix, Cross-Referencing, Argumentation, „Escalation?“, ohne Score. In `src/engine/` als TypeScript-Port der Python-Module, gegen das Backend geprüft: Für 16/16 Demo-Lieferanten stimmen Risk?, Escalation?, Kombinationen und Empfehlung überein.
+- **Prompts der KI-Agenten** (Internal Data: Risk?, Decision Maker: Argumentation und Escalation?)
 
 ## Unterschiede
 
 | Bereich | Server-Version (GitHub `main`) | Artefakt-Variante | Später angleichen? |
 |---|---|---|---|
-| **Agenten-Logik läuft** | im Python-Backend (`backend/app/`) | im Browser (`frontend/src/engine/`) | Doppelte Logik. Änderungen an Schwellen/Gewichten/Prompts **in beiden** machen, oder das Backend als einzige Quelle nutzen. |
+| **Agenten-Logik läuft** | im Python-Backend (`backend/app/`) | im Browser (`frontend/src/engine/`) | Doppelte Logik. Änderungen an Schwellen, Regeln oder Prompts **in beiden** machen, oder das Backend als einzige Quelle nutzen. |
 | **LLM** | `LLM_PROVIDER`: Claude-API (eigener API-Key), Ollama (offline) oder regelbasiert | Claude über das claude.ai-Konto des Betrachters (`sample`) oder regelbasiert, umschaltbar oben rechts | – |
 | **Speicher** | SQLite (`risk.db`) | Datenbank des Artefakts (`db`: `suppliers`, `results`, `notifications`), geteilt zwischen allen mit Zugriff; ohne Anmeldung nur im Speicher bis zum Neuladen | Export/Import zwischen beiden fehlt noch |
 | **Web-Signale (External Module)** | Live-Crawling von Website + News (`CRAWLER_ENABLED=true`), Klassifikation durch das LLM | **Prompt-Workflow:** Recherche-Prompt kopieren → in Claude-Chat mit Websuche ausführen → Antwort einfügen → Vorschau → übernehmen. Auch als Sammel-Recherche für bis zu 15 Lieferanten. Einzelne Signale löschbar. | Den Prompt-Workflow auch in der Server-Version anbieten (manuelle Signale + Endpunkt zum Speichern) |
@@ -35,6 +35,10 @@ Die Oberfläche spricht in beiden Fällen nur mit dem gemeinsamen Interface `src
 | **Deep-Link** `?supplier=…` | aus Mails/Teams-Karten | nicht nutzbar (claude.ai reicht Query-Parameter nicht weiter) | – |
 | **Lieferanten-IDs** | fortlaufend `S1000, S1001, …` | `S` + Zeitstempel (mehrere Personen können gleichzeitig anlegen) | – |
 | **Rechte** | wer die App erreicht, darf alles | Lesen: alle mit Zugriff; Ändern: wer im Artefakt mindestens „Contributor“ ist | – |
+
+## Ergebnisse aus der ersten Artefakt-Version
+
+Die erste veröffentlichte Version hatte noch einen numerischen Score. Dort gespeicherte Ergebnisse erkennt das Artefakt am fehlenden `risk_check` und bewertet sie regelbasiert neu, bis eine neue Analyse gespeichert wird.
 
 ## Wo im Code
 

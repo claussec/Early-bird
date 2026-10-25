@@ -6,7 +6,7 @@ import { EMPTY_FILTERS, FilterPanel, applyFilters } from './components/FilterPan
 import { SupplierForm } from './components/SupplierForm'
 import { Legend, TopBar } from './components/TopBar'
 import { Scene } from './scene/Scene'
-import type { Filters, Meta, Notification, StepState, Supplier, SupplierDetail } from './types'
+import type { Filters, Meta, Notification, RiskStatus, StepState, Supplier, SupplierDetail } from './types'
 
 export default function App() {
   const [meta, setMeta] = useState<Meta | null>(null)
@@ -89,7 +89,7 @@ export default function App() {
     setSteps(Object.fromEntries(meta.steps.map(([s]) => [s, { status: 'pending', summary: '' }])))
     try {
       await backend.analyze(id, (e) => {
-        if (e.type === 'step') setSteps((prev) => ({ ...prev, [e.step!]: { status: e.status!, summary: e.summary ?? '' } }))
+        if (e.type === 'step') setSteps((prev) => ({ ...prev, [e.step!]: { status: e.status as StepState['status'], summary: e.summary ?? '' } }))
       })
       const [d] = await Promise.all([backend.supplier(id), refresh()])
       setDetail(d)
@@ -136,7 +136,7 @@ export default function App() {
         if (e.type === 'supplier') setCycle((c) => ({ ...c, current: e.name?.split(' ')[0] ?? '' }))
         if (e.type === 'supplier_done') {
           setCycle((c) => ({ ...c, done: c.done + 1 }))
-          setSuppliers((list) => list.map((s) => (s.id === e.supplier_id ? { ...s, traffic_light: e.traffic_light, score: e.score } : s)))
+          setSuppliers((list) => list.map((s) => (s.id === e.supplier_id ? { ...s, status: e.status as RiskStatus } : s)))
         }
       })
       await reload()

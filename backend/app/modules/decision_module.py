@@ -1,14 +1,17 @@
 """Decision Module (Figure 4).
 
-A preset task list guides the AI agent through the steps in sequence:
+A preset task list guides the AI agent through the steps in sequence, so that the data
+is first structured, then validated, and finally weighed against each other:
   1. Mapping indicators   – every data point becomes a risk or success indicator (standardized matrix)
-  2. Cross-referencing     – indicators are relativized and combined; financial signals are prioritized
-  3. Argumentation         – a traceable chain of arguments is generated
-  4. AI decision making    – traffic light and escalation decision
+  2. Cross-referencing     – indicators are relativized and weighed, financial signals prioritized
+  3. Argumentation         – a traceable chain of argumentation
+  4. AI decision making    – "Escalation?" with an action-oriented recommendation
 The escalation itself (notification to the buyer) is handled by the pipeline.
+
+Following the paper there is no numeric score: the result is the argumentation and the
+escalation decision, which the buyer uses for the final risk assessment.
 """
 
-import math
 from datetime import date
 from typing import Literal
 
@@ -17,31 +20,15 @@ from pydantic import BaseModel
 from ..llm import LLM, LLMUnavailable
 
 # Financial signals are prioritized over quality signals (paper, "Interpretation of results").
-GROUP_WEIGHTS = {
-    "Rating": 1.0,
-    "Umsatz": 0.9,
-    "Abhängigkeit": 0.9,
-    "Planung": 0.7,
-    "Extern": 0.6,
-    "Qualität": 0.4,
-}
-KPI_WEIGHT_OVERRIDES = {"rating_gap": 0.5, "revenue_cagr": 0.6}
-STATUS_SEVERITY = {"critical": 1.0, "warn": 0.5}
-COMBINATION_BONUS = 0.75
-SCORE_SCALE = 3.0
-LIGHTS = ["green", "yellow", "red"]
+FINANCIAL_GROUPS = ("Rating", "Umsatz", "Abhängigkeit", "Planung")
+PRIORITY = {"finanziell": 0, "extern": 1, "operativ": 2}
 LIGHT_DE = {"green": "Grün", "yellow": "Gelb", "red": "Rot"}
+STRENGTH_DE = {"strong": "deutlich", "weak": "schwach"}
+# Web signals older than this count as weak (relativizing by recency).
+EXTERNAL_MAX_AGE_YEARS = 2
 
 
-def light_for(score: int) -> str:
-    if score >= 60:
-        return "red"
-    if score >= 35:
-        return "yellow"
-    return "green"
-
-
-# --- Step 1: Mapping indicators ---------------------------------------------------------
+# --- Step 1: Mapping indicators (standardized matrix) ------------------------------------
 
 
 def _success(kpi: dict) -> bool:
@@ -58,37 +45,41 @@ def _success(kpi: dict) -> bool:
 
 
 def map_indicators(kpis: list[dict], external: list[dict], as_of: str) -> list[dict]:
+    """Assigns every data point to a risk, success or neutral indicator.
+
+    KPI threshold exceeded → risk indicator ("deutlich" above the critical threshold,
+    "schwach" above the warning threshold); clearly positive value → success indicator.
+    """
     indicators = []
     for k in kpis:
-        weight = KPI_WEIGHT_OVERRIDES.get(k["id"], GROUP_WEIGHTS[k["group"]])
-        if k["status"] in STATUS_SEVERITY:
-            kind, severity = "risk", STATUS_SEVERITY[k["status"]]
+        if k["status"] in ("critical", "warn"):
+            kind, strength = "risk", "strong" if k["status"] == "critical" else "weak"
         elif _success(k):
-            kind, severity = "success", 0.5
+            kind, strength = "success", "weak"
         else:
-            kind, severity = "neutral", 0.0
+            kind, strength = "neutral", None
         indicators.append(
             {
                 "id": k["id"],
                 "label": k["label"],
                 "group": k["group"],
                 "type": kind,
-                "severity": severity,
-                "weight": weight,
-                "points": round(weight * severity, 2),
+                "strength": strength,
+                "priority": "finanziell" if k["group"] in FINANCIAL_GROUPS else "operativ",
                 "value": f"{k['value']} {k['unit']}",
                 "source": k["source"],
-                "evidence": k["formula"],
+                "evidence": f"{k['formula']} (Schwelle: {k['threshold']})",
             }
         )
     ref_year = int(as_of[:4]) if as_of else date.today().year
     for i, doc in enumerate(external):
         if doc["signal"] == "neutral":
             continue
-        # Relativize: older documents count less (−25 % per year, floor 25 %).
-        age = max(0, ref_year - int(doc["date"][:4])) if doc.get("date") else 1
-        recency = max(0.25, 1 - 0.25 * age)
-        severity = doc["severity"] / 3
+        age = max(0, ref_year - int(doc["date"][:4])) if doc.get("date") else None
+        strength = "strong" if doc["severity"] == 3 else "weak"
+        note = ""
+        if age is not None and age >= EXTERNAL_MAX_AGE_YEARS:
+            strength, note = "weak", f" Meldung ist {age} Jahre alt und wird daher schwächer gewichtet."
         indicators.append(
             {
                 "id": f"ext_{i}",
@@ -96,12 +87,12 @@ def map_indicators(kpis: list[dict], external: list[dict], as_of: str) -> list[d
                 "group": "Extern",
                 "category": doc["category"],
                 "type": doc["signal"],
-                "severity": round(severity, 2),
-                "weight": round(GROUP_WEIGHTS["Extern"] * recency, 2),
-                "points": round(GROUP_WEIGHTS["Extern"] * recency * severity, 2),
+                "strength": strength,
+                "severity": doc["severity"],
+                "priority": "extern",
                 "value": doc["category"],
                 "source": doc.get("source", "Web"),
-                "evidence": doc["rationale"],
+                "evidence": doc["rationale"] + note,
                 "date": doc.get("date", ""),
                 "url": doc.get("url", ""),
             }
@@ -112,7 +103,16 @@ def map_indicators(kpis: list[dict], external: list[dict], as_of: str) -> list[d
 # --- Step 2: Cross-referencing ----------------------------------------------------------
 
 
+def prioritized(indicators: list[dict], kind: str) -> list[dict]:
+    """Indicators of one type, financial before external before operational, strong before weak."""
+    return sorted(
+        (i for i in indicators if i["type"] == kind),
+        key=lambda i: (PRIORITY[i["priority"]], 0 if i["strength"] == "strong" else 1),
+    )
+
+
 def cross_reference(indicators: list[dict]) -> list[dict]:
+    """Relates indicators to each other; each combination is an argument of its own."""
     by_id = {i["id"]: i for i in indicators}
 
     def risk(i: str) -> bool:
@@ -161,7 +161,8 @@ def cross_reference(indicators: list[dict]) -> list[dict]:
                 "indicator_ids": [i["id"] for i in ext_risk[:3]] + [i["id"] for i in internal_fin_risk[:2]],
             }
         )
-    severe_ext = [i for i in ext_risk if i["severity"] >= 0.66]
+    # Web signals with at least a clear warning (severity 2 of 3).
+    severe_ext = [i for i in ext_risk if i.get("severity", 1) >= 2]
     if len(severe_ext) >= 2 and not internal_fin_risk:
         combos.append(
             {
@@ -174,22 +175,6 @@ def cross_reference(indicators: list[dict]) -> list[dict]:
             }
         )
     return combos
-
-
-def score(indicators: list[dict], combos: list[dict]) -> dict:
-    risk_pts = sum(i["points"] for i in indicators if i["type"] == "risk")
-    success_pts = sum(i["points"] for i in indicators if i["type"] == "success")
-    combo_pts = COMBINATION_BONUS * len(combos)
-    total = max(0.0, risk_pts + combo_pts - 0.5 * success_pts)
-    value = round(100 * (1 - math.exp(-total / SCORE_SCALE)))
-    return {
-        "score": value,
-        "traffic_light": light_for(value),
-        "risk_points": round(risk_pts, 2),
-        "success_points": round(success_pts, 2),
-        "combination_points": round(combo_pts, 2),
-        "formula": f"Score = 100 · (1 − e^(−({risk_pts:.2f} + {combo_pts:.2f} − 0,5 · {success_pts:.2f}) / {SCORE_SCALE}))",
-    }
 
 
 # --- Step 3: Argumentation ---------------------------------------------------------------
@@ -210,7 +195,6 @@ class Argumentation(BaseModel):
 
 
 class Decision(BaseModel):
-    traffic_light: Literal["green", "yellow", "red"]
     escalate: bool
     confidence: Literal["low", "medium", "high"]
     justification: str
@@ -218,27 +202,30 @@ class Decision(BaseModel):
 
 SYSTEM_ARGUMENT = (
     "Du bist der AI Agent 'Decision Maker' eines Frühwarnsystems für finanziell kritische Lieferanten im "
-    "Automotive-Einkauf. Du erhältst strukturierte, bereits berechnete Indikatoren (mit Formeln und Quellen) und "
-    "Kombinationen. Erzeuge eine nachvollziehbare Argumentationskette für den verantwortlichen Einkäufer: "
-    "Jedes Argument muss sich auf konkrete indicator_ids stützen. Priorisiere Finanzsignale vor Qualitätssignalen. "
-    "Erfinde keine Zahlen; verwende nur die gelieferten Werte. Schreibe sachlich auf Deutsch. "
-    "Gib eine handlungsorientierte Empfehlung und 2–5 konkrete Maßnahmen."
+    "Automotive-Einkauf. Du erhältst strukturierte Risiko- und Erfolgsindikatoren (mit Werten, Schwellen und "
+    "Quellen) sowie Kombinationen aus dem Cross-Referencing. Relativiere und gewichte die Indikatoren "
+    "gegeneinander, priorisiere Finanzsignale vor Qualitätssignalen und erzeuge eine nachvollziehbare "
+    "Argumentationskette für den verantwortlichen Einkäufer: Jedes Argument muss sich auf konkrete "
+    "indicator_ids stützen. Berücksichtige auch stabilisierende Erfolgsindikatoren. Erfinde keine Zahlen; "
+    "verwende nur die gelieferten Werte. Vergib keine Punkte und keinen Score. Schreibe sachlich auf Deutsch. "
+    "Gib eine handlungsorientierte Empfehlung (z. B. sorgfältige Neubewertung, Phase-out prüfen, beobachten) "
+    "und 2–5 konkrete Maßnahmen."
 )
 
 SYSTEM_DECISION = (
-    "Du bist der AI Agent 'Decision Maker'. Entscheide über die Ampel (green/yellow/red) und ob an den "
-    "Einkäufer eskaliert wird. Der regelbasierte Score ist der Ausgangspunkt; du darfst höchstens um eine "
-    "Stufe abweichen und musst jede Abweichung begründen. Eskaliere, wenn die Ampel rot ist oder sich die "
-    "Einstufung gegenüber dem internen Risikoregister verschlechtert."
+    "Du bist der AI Agent 'Decision Maker'. Entscheide auf Basis der Argumentationskette, ob der Fall an den "
+    "verantwortlichen Einkäufer eskaliert wird (Escalation? ja/nein). Eskaliere, wenn die Argumente auf ein "
+    "relevantes finanzielles Risiko hindeuten, das Handeln des Einkäufers erfordert. Reine Qualitätsauffälligkeiten "
+    "ohne finanzielle Signale sind kein Grund für eine Eskalation. Begründe die Entscheidung mit den "
+    "ausschlaggebenden Argumenten und vergib keinen Score."
 )
 
 
 def _fmt_indicators(indicators: list[dict]) -> str:
     return "\n".join(
-        f"- {i['id']} [{i['group']}, {i['type']}, Punkte {i['points']}]: {i['label']} = {i['value']} "
-        f"(Quelle: {i['source']}; {i['evidence']})"
-        for i in indicators
-        if i["type"] != "neutral"
+        f"- {i['id']} [{i['group']}, {i['type']}, {STRENGTH_DE.get(i['strength'], '')}, Priorität {i['priority']}]: "
+        f"{i['label']} = {i['value']} (Quelle: {i['source']}; {i['evidence']})"
+        for i in prioritized(indicators, "risk") + prioritized(indicators, "success")
     )
 
 
@@ -255,15 +242,28 @@ MEASURES = {
 }
 
 
-def template_argumentation(indicators: list[dict], combos: list[dict], light: str) -> Argumentation:
-    by_id = {i["id"]: i for i in indicators}
+def escalation_triggers(indicators: list[dict], combos: list[dict]) -> list[str]:
+    """Transparent rule for the escalation decision without an LLM.
+
+    Escalate when the cross-referencing found at least one combination, or when at least one
+    financial (or financially relevant external) risk indicator is clearly above its threshold.
+    Quality indicators alone never escalate, because financial signals are prioritized.
+    """
+    triggers = [f"Kombination „{c['title']}“" for c in combos]
+    for i in prioritized(indicators, "risk"):
+        if i["strength"] == "strong" and i["priority"] in ("finanziell", "extern"):
+            triggers.append(f"{i['label']} ({i['value']})" if i["priority"] == "finanziell" else f"Web-Meldung: {i['label']}")
+    return triggers
+
+
+def template_argumentation(indicators: list[dict], combos: list[dict]) -> Argumentation:
     args, covered = [], set()
     for c in combos:
         args.append(
             Argument(title=c["title"], direction="risk", reasoning=c["description"], indicator_ids=c["indicator_ids"])
         )
         covered.update(c["indicator_ids"])
-    risks = sorted((i for i in indicators if i["type"] == "risk"), key=lambda i: -i["points"])
+    risks = prioritized(indicators, "risk")
     for i in risks:
         if i["id"] in covered or len(args) >= 6:
             continue
@@ -271,11 +271,12 @@ def template_argumentation(indicators: list[dict], combos: list[dict], light: st
             Argument(
                 title=i["label"],
                 direction="risk",
-                reasoning=f"{i['label']}: {i['value']}. {i['evidence']} (Quelle: {i['source']}).",
+                reasoning=f"{i['label']}: {i['value']}, Risikoindikator ({STRENGTH_DE[i['strength']]}). "
+                f"{i['evidence']} (Quelle: {i['source']}).",
                 indicator_ids=[i["id"]],
             )
         )
-    for i in sorted((i for i in indicators if i["type"] == "success"), key=lambda i: -i["points"])[:3]:
+    for i in prioritized(indicators, "success")[:3]:
         args.append(
             Argument(
                 title=f"Stabilisierend: {i['label']}",
@@ -289,71 +290,67 @@ def template_argumentation(indicators: list[dict], combos: list[dict], light: st
         m = MEASURES.get(i["id"]) or MEASURES.get(i["group"])
         if m and m not in measures:
             measures.append(m)
-    n_risk = len(risks)
-    top = ", ".join(i["label"] for i in risks[:3]) or "keine"
-    if light == "red":
-        rec = "Eskalation an den verantwortlichen Einkäufer: Lieferant sorgfältig neu bewerten, Phase-out bzw. Dual-Sourcing prüfen und das zentrale Risikomanagement einbinden."
-    elif light == "yellow":
-        rec = "Sorgfältige Neubewertung des Lieferanten: Lieferantengespräch führen, Finanzunterlagen anfordern und Entwicklung im nächsten Quartal eng beobachten."
+    financial = [i for i in risks if i["priority"] == "finanziell"]
+    if escalation_triggers(indicators, combos):
+        if any(c["id"] == "dependency_decline" for c in combos) or len([i for i in financial if i["strength"] == "strong"]) >= 3:
+            rec = (
+                "Sorgfältige Neubewertung des Lieferanten durch den Einkäufer; Phase-out bzw. Dual-Sourcing prüfen "
+                "und das zentrale Risikomanagement einbinden."
+            )
+        else:
+            rec = "Sorgfältige Neubewertung des Lieferanten: Lieferantengespräch führen und aktuelle Finanzunterlagen anfordern."
     else:
-        rec = "Keine Maßnahme erforderlich – reguläres quartalsweises Monitoring fortsetzen."
-        measures = measures[:1]
+        rec = "Auffälligkeiten beobachten und im nächsten Quartal erneut bewerten."
+        measures = measures[:2]
+    top = ", ".join(i["label"] for i in risks[:3]) or "keine"
     summary = (
-        f"{n_risk} Risikoindikator(en) und {len(combos)} kritische Kombination(en) identifiziert. "
-        f"Wichtigste Treiber: {top}."
+        f"{len(risks)} Risikoindikator(en), davon {len(financial)} finanziell, und {len(combos)} kritische "
+        f"Kombination(en). Wichtigste Treiber: {top}."
     )
     if not measures:
-        measures = ["Reguläres Monitoring im nächsten Quartal"]
+        measures = ["Entwicklung im nächsten Quartal erneut bewerten"]
     return Argumentation(summary=summary, arguments=args, recommendation=rec, measures=measures[:5])
 
 
-def generate_argumentation(master: dict, indicators: list[dict], combos: list[dict], scoring: dict, llm: LLM):
+def generate_argumentation(master: dict, indicators: list[dict], combos: list[dict], llm: LLM):
     try:
         prompt = (
             f"Lieferant: {master['name']} ({master['commodity']}), internes Risikoregister: "
-            f"{LIGHT_DE[master['register_status']]}.\n"
-            f"Regelbasierter Score: {scoring['score']}/100 ({LIGHT_DE[scoring['traffic_light']]}).\n\n"
-            f"Indikatoren:\n{_fmt_indicators(indicators)}\n\n"
-            "Kombinationen:\n" + "\n".join(f"- {c['title']}: {c['description']} ({', '.join(c['indicator_ids'])})" for c in combos)
+            f"{LIGHT_DE[master['register_status']]}.\n\n"
+            f"Indikatoren (priorisiert):\n{_fmt_indicators(indicators)}\n\n"
+            "Kombinationen:\n"
+            + ("\n".join(f"- {c['title']}: {c['description']} ({', '.join(c['indicator_ids'])})" for c in combos) or "(keine)")
         )
         return llm.structured(SYSTEM_ARGUMENT, prompt, Argumentation), llm.label
     except LLMUnavailable:
-        return template_argumentation(indicators, combos, scoring["traffic_light"]), "Regelbasierte Vorlage"
+        return template_argumentation(indicators, combos), "Regelbasierte Vorlage"
 
 
-def rule_decision(scoring: dict, register_status: str, combos: list[dict]) -> Decision:
-    light = scoring["traffic_light"]
-    worse = LIGHTS.index(light) > LIGHTS.index(register_status)
-    escalate = light == "red" or worse
-    reasons = [f"Score {scoring['score']}/100 → {LIGHT_DE[light]}"]
-    if worse:
-        reasons.append(f"Verschlechterung gegenüber Risikoregister ({LIGHT_DE[register_status]} → {LIGHT_DE[light]})")
-    if combos:
-        reasons.append(f"{len(combos)} kritische Indikator-Kombination(en)")
-    return Decision(
-        traffic_light=light,
-        escalate=escalate,
-        confidence="high" if abs(scoring["score"] - 47) > 20 else "medium",
-        justification="; ".join(reasons) + ".",
-    )
+# --- Step 4: AI decision making -----------------------------------------------------------
 
 
-def decide(master: dict, scoring: dict, combos: list[dict], argumentation: Argumentation, llm: LLM):
-    baseline = rule_decision(scoring, master["register_status"], combos)
+def rule_decision(indicators: list[dict], combos: list[dict], register_status: str) -> Decision:
+    triggers = escalation_triggers(indicators, combos)
+    if triggers:
+        text = "Eskalation, ausschlaggebend: " + "; ".join(triggers[:4]) + "."
+        if register_status == "red":
+            text += " Der Lieferant ist im internen Risikoregister bereits als Risikolieferant geführt."
+    else:
+        text = (
+            "Keine Eskalation: Kein finanzieller Indikator liegt deutlich über seiner Schwelle und das "
+            "Cross-Referencing hat keine kritische Kombination ergeben."
+        )
+    return Decision(escalate=bool(triggers), confidence="medium", justification=text)
+
+
+def decide(master: dict, indicators: list[dict], combos: list[dict], argumentation: Argumentation, llm: LLM):
     try:
         prompt = (
-            f"Lieferant: {master['name']}. Internes Risikoregister: {master['register_status']}.\n"
-            f"Regelbasierter Score: {scoring['score']}/100 → {scoring['traffic_light']}.\n"
+            f"Lieferant: {master['name']}. Internes Risikoregister: {LIGHT_DE[master['register_status']]}.\n"
             f"Zusammenfassung: {argumentation.summary}\n"
             "Argumente:\n" + "\n".join(f"- ({a.direction}) {a.title}: {a.reasoning}" for a in argumentation.arguments)
+            + f"\nEmpfehlung: {argumentation.recommendation}"
         )
-        d = llm.structured(SYSTEM_DECISION, prompt, Decision)
-        # Guardrail: the agent may deviate from the rule-based light by at most one level.
-        if abs(LIGHTS.index(d.traffic_light) - LIGHTS.index(baseline.traffic_light)) > 1:
-            d.traffic_light = "yellow"
-            d.justification += " (Begrenzt auf eine Stufe Abweichung vom regelbasierten Score.)"
-        if d.traffic_light == "red" or LIGHTS.index(d.traffic_light) > LIGHTS.index(master["register_status"]):
-            d.escalate = True
-        return d, llm.label
+        return llm.structured(SYSTEM_DECISION, prompt, Decision), llm.label
     except LLMUnavailable:
-        return baseline, "Regelbasiert"
+        return rule_decision(indicators, combos, master["register_status"]), "Regelbasiert"

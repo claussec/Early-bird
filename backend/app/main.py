@@ -47,9 +47,10 @@ def _summary(master: dict, report: dict | None) -> dict:
         kpi = {k["id"]: k for k in report["kpis"]}
         series = report["series"]
         out.update(
-            score=report["scoring"]["score"],
-            traffic_light=report["decision"]["traffic_light"],
+            status=report["status"],
             escalate=report["decision"]["escalate"],
+            risk_indicators=sum(1 for i in report["indicators"] if i["type"] == "risk"),
+            recommendation=report["argumentation"]["recommendation"],
             assessed_at=report["created_at"],
             as_of=report["as_of"],
             customer_share=kpi.get("customer_share", {}).get("value"),
@@ -164,7 +165,7 @@ def supplier(supplier_id: str):
         "supplier": _summary(master, history[0] if history else None),
         "report": history[0] if history else None,
         "history": [
-            {"created_at": h["created_at"], "score": h["scoring"]["score"], "traffic_light": h["decision"]["traffic_light"], "llm": h["llm"]}
+            {"created_at": h["created_at"], "status": h["status"], "llm": h["llm"]}
             for h in reversed(history)
         ],
     }
@@ -188,8 +189,7 @@ def quarterly_cycle():
             yield {
                 "type": "supplier_done",
                 "supplier_id": s["id"],
-                "traffic_light": report["decision"]["traffic_light"],
-                "score": report["scoring"]["score"],
+                "status": report["status"],
             }
         yield {"type": "cycle_done"}
 

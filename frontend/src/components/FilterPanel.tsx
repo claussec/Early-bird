@@ -1,7 +1,7 @@
 import { ChevronDown, Globe, Plus, Search, SlidersHorizontal, Trash2, X } from 'lucide-react'
 import { useState } from 'react'
-import { STATUS, fmt, fmtUnit, joinDot } from '../theme'
-import type { Filters, Light, Supplier } from '../types'
+import { RISK, RISK_ORDER, fmt, fmtUnit, joinDot } from '../theme'
+import type { Filters, Supplier } from '../types'
 import { Chip, StatusIcon, Toggle } from './ui'
 
 interface Props {
@@ -23,7 +23,7 @@ interface Props {
 
 export const EMPTY_FILTERS: Filters = {
   query: '',
-  lights: [],
+  statuses: [],
   commodities: [],
   countries: [],
   escalatedOnly: false,
@@ -36,7 +36,7 @@ export function applyFilters(suppliers: Supplier[], f: Filters) {
   return suppliers.filter(
     (s) =>
       (!q || [s.name, s.number, s.city, s.country, s.commodity, s.buyer.name].some((v) => v.toLowerCase().includes(q))) &&
-      (!f.lights.length || (s.traffic_light && f.lights.includes(s.traffic_light))) &&
+      (!f.statuses.length || (s.status && f.statuses.includes(s.status))) &&
       (!f.commodities.length || f.commodities.includes(s.commodity)) &&
       (!f.countries.length || f.countries.includes(s.country)) &&
       (!f.escalatedOnly || s.escalate) &&
@@ -64,13 +64,17 @@ export function FilterPanel({
   const [confirmDemo, setConfirmDemo] = useState(false)
   const active =
     filters.query ||
-    filters.lights.length ||
+    filters.statuses.length ||
     filters.commodities.length ||
     filters.countries.length ||
     filters.escalatedOnly ||
     filters.highDependency ||
     filters.minPd > 0
-  const sorted = [...visible].sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+  // Escalated first, then risk, then no risk; within a group by number of risk indicators.
+  const rank = (s: Supplier) => RISK_ORDER.indexOf(s.status ?? 'none')
+  const sorted = [...visible].sort(
+    (a, b) => rank(a) - rank(b) || (b.risk_indicators ?? 0) - (a.risk_indicators ?? 0) || a.name.localeCompare(b.name),
+  )
   // On small screens the filters and the list collapse behind a toggle so the 3D scene stays visible.
   const [open, setOpen] = useState(false)
   const collapsible = open ? '' : 'hidden md:block'
@@ -126,14 +130,14 @@ export function FilterPanel({
           </div>
 
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {(['red', 'yellow', 'green'] as Light[]).map((l) => (
+            {RISK_ORDER.map((st) => (
               <Chip
-                key={l}
-                active={filters.lights.includes(l)}
-                onClick={() => setFilters({ ...filters, lights: toggle(filters.lights, l) })}
+                key={st}
+                active={filters.statuses.includes(st)}
+                onClick={() => setFilters({ ...filters, statuses: toggle(filters.statuses, st) })}
               >
-                <StatusIcon light={l} size={12} /> {STATUS[l].label}
-                <span className="text-ink-3">{suppliers.filter((s) => s.traffic_light === l).length}</span>
+                <StatusIcon light={RISK[st].light} size={12} /> {RISK[st].label}
+                <span className="text-ink-3">{suppliers.filter((s) => s.status === st).length}</span>
               </Chip>
             ))}
           </div>
@@ -193,7 +197,7 @@ export function FilterPanel({
         <span>
           {visible.length} von {suppliers.length} Lieferanten
         </span>
-        <span>nach Score sortiert</span>
+        <span>Eskalierte zuerst</span>
       </div>
       <ul className={`${collapsible} scroll-thin min-h-0 flex-1 overflow-y-auto px-2 pb-2`}>
         {sorted.map((s) => (
@@ -212,7 +216,7 @@ export function FilterPanel({
               <span
                 className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-surface-2 ${s.escalate ? 'pulse-crit' : ''}`}
               >
-                <StatusIcon light={s.traffic_light ?? 'green'} size={15} />
+                <StatusIcon light={RISK[s.status ?? 'none'].light} size={15} />
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[13px] font-medium text-ink-1">{s.name}</span>
@@ -220,7 +224,11 @@ export function FilterPanel({
                   {joinDot(s.number, s.city, `CS ${fmtUnit(s.customer_share, '%', 0)}`, `PD ${fmtUnit(s.pd, '%', 1)}`)}
                 </span>
               </span>
-              <span className="font-mono text-sm text-ink-2">{s.score}</span>
+              {(s.risk_indicators ?? 0) > 0 && (
+                <span className="shrink-0 text-[11px] text-ink-3" title="Risikoindikatoren">
+                  {s.risk_indicators} RI
+                </span>
+              )}
             </button>
           </li>
         ))}

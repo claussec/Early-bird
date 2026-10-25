@@ -1,7 +1,7 @@
 import { AlertOctagon, AlertTriangle, CheckCircle2 } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { STATUS } from '../theme'
-import type { Light } from '../types'
+import { RISK, STATUS } from '../theme'
+import type { Light, RiskStatus } from '../types'
 
 const ICONS = { green: CheckCircle2, yellow: AlertTriangle, red: AlertOctagon }
 
@@ -56,31 +56,12 @@ export function Toggle({ checked, onChange, label }: { checked: boolean; onChang
   )
 }
 
-export function ScoreGauge({ score, light }: { score: number; light: Light }) {
-  const r = 34
-  const c = 2 * Math.PI * r
-  const arc = c * 0.75
+/** Result of the agents: Risk? / Escalation?, with icon and label. */
+export function RiskBadge({ status, size = 'md' }: { status: RiskStatus; size?: 'sm' | 'md' }) {
   return (
-    <div className="relative h-[88px] w-[88px]">
-      <svg viewBox="0 0 88 88" className="h-full w-full -rotate-[225deg]">
-        <circle cx="44" cy="44" r={r} fill="none" stroke="#232a35" strokeWidth="7" strokeDasharray={`${arc} ${c}`} strokeLinecap="round" />
-        <circle
-          cx="44"
-          cy="44"
-          r={r}
-          fill="none"
-          stroke={STATUS[light].color}
-          strokeWidth="7"
-          strokeDasharray={`${(arc * score) / 100} ${c}`}
-          strokeLinecap="round"
-          style={{ transition: 'stroke-dasharray 0.8s ease' }}
-        />
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="font-mono text-2xl font-semibold leading-none text-ink-1">{score}</span>
-        <span className="mt-1 text-[10px] uppercase tracking-wider text-ink-3">Score</span>
-      </div>
-    </div>
+    <StatusBadge light={RISK[status].light} size={size}>
+      {RISK[status].label}
+    </StatusBadge>
   )
 }
 

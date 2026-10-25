@@ -1,7 +1,8 @@
 import { Bell, Bot, Loader2, Radar, RefreshCw } from 'lucide-react'
 import { useState } from 'react'
 import { backend } from '../backend'
-import type { Meta, Notification, Supplier } from '../types'
+import { RISK, RISK_ORDER } from '../theme'
+import type { Meta, Notification, RiskStatus, Supplier } from '../types'
 import { AgentModeControl } from './AgentModeControl'
 import { AutomodeControl } from './AutomodeControl'
 import { StatusIcon } from './ui'
@@ -20,8 +21,7 @@ interface Props {
 
 export function TopBar({ meta, suppliers, notifications, cycle, onCycle, onSelect, onAutomodeFinished }: Props) {
   const [open, setOpen] = useState(false)
-  const count = (l: string) => suppliers.filter((s) => s.traffic_light === l).length
-  const escalated = suppliers.filter((s) => s.escalate).length
+  const count = (st: RiskStatus) => suppliers.filter((s) => s.status === st).length
   const inbox = notifications.filter((n) => n.channel === 'inapp')
 
   return (
@@ -37,21 +37,21 @@ export function TopBar({ meta, suppliers, notifications, cycle, onCycle, onSelec
       </div>
 
       <div className="glass hidden items-center gap-4 rounded-2xl px-4 py-3 text-sm sm:flex">
-        {(['red', 'yellow', 'green'] as const).map((l) => (
-          <span key={l} className="flex items-center gap-1.5 text-ink-2">
-            <StatusIcon light={l} size={15} />
-            <b className="font-mono text-ink-1">{count(l)}</b>
+        {RISK_ORDER.map((st) => (
+          <span key={st} className="flex items-center gap-1.5 text-xs text-ink-3" title={RISK[st].hint}>
+            <StatusIcon light={RISK[st].light} size={15} />
+            <b className="font-mono text-sm text-ink-1">{count(st)}</b>
+            <span className="hidden lg:inline">{RISK[st].label}</span>
           </span>
         ))}
-        <span className="h-4 w-px bg-line" />
-        <span className="text-xs text-ink-3">
-          <b className="font-mono text-sm text-ink-1">{escalated}</b> Eskalationen
-        </span>
       </div>
 
       <div className="ml-auto flex items-center gap-2 md:gap-3">
         {meta && !backend.agents && (
-          <div className="glass hidden items-center gap-2 rounded-2xl px-3 py-2.5 text-xs text-ink-2 md:flex" title="LLM-Provider (LLM_PROVIDER)">
+          <div
+            className="glass hidden items-center gap-2 rounded-2xl px-3 py-2.5 text-xs text-ink-2 md:flex"
+            title="LLM-Provider (LLM_PROVIDER)"
+          >
             <Bot size={15} className="text-accent" /> {meta.llm}
           </div>
         )}
@@ -70,7 +70,11 @@ export function TopBar({ meta, suppliers, notifications, cycle, onCycle, onSelec
           {cycle.running && <span className="hidden sm:inline">· {cycle.current}</span>}
         </button>
         <div className="relative">
-          <button onClick={() => setOpen(!open)} className="glass relative rounded-2xl p-2.5 text-ink-2 hover:text-ink-1" aria-label="Benachrichtigungen">
+          <button
+            onClick={() => setOpen(!open)}
+            className="glass relative rounded-2xl p-2.5 text-ink-2 hover:text-ink-1"
+            aria-label="Benachrichtigungen"
+          >
             <Bell size={18} />
             {inbox.length > 0 && (
               <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-crit px-1 font-mono text-[10px] font-semibold text-white">
@@ -80,7 +84,9 @@ export function TopBar({ meta, suppliers, notifications, cycle, onCycle, onSelec
           </button>
           {open && (
             <div className="glass scroll-thin absolute right-0 top-12 z-50 max-h-[60vh] w-[min(380px,calc(100vw-32px))] overflow-y-auto rounded-2xl p-2">
-              <div className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-3">Benachrichtigungen an Einkäufer</div>
+              <div className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-3">
+                Benachrichtigungen an Einkäufer
+              </div>
               {notifications.map((n, i) => (
                 <button
                   key={n.id ?? i}
@@ -93,7 +99,12 @@ export function TopBar({ meta, suppliers, notifications, cycle, onCycle, onSelec
                   <div className="text-[13px] font-medium text-ink-1">{n.subject}</div>
                   <div className="text-[11px] text-ink-3">
                     {CHANNEL_LABEL[n.channel] ?? n.channel} · an {n.recipient} · {new Date(n.created_at).toLocaleString('de-DE')}
-                    {n.status === 'failed' && <span className="text-[#ff8a8a]" title={n.error}> · fehlgeschlagen</span>}
+                    {n.status === 'failed' && (
+                      <span className="text-[#ff8a8a]" title={n.error}>
+                        {' '}
+                        · fehlgeschlagen
+                      </span>
+                    )}
                   </div>
                 </button>
               ))}
@@ -117,9 +128,9 @@ export function Legend() {
         <span className="inline-block h-3 w-3 rounded-full border-2 border-[#ff8a5c]" /> ≥ 50 %
       </span>
       <span className="flex items-center gap-1.5">
-        <StatusIcon light="green" size={12} />
-        <StatusIcon light="yellow" size={12} />
-        <StatusIcon light="red" size={12} /> Farbe = KI-Ampel
+        <StatusIcon light="green" size={12} /> Kein Risiko
+        <StatusIcon light="yellow" size={12} /> Risiko erkannt
+        <StatusIcon light="red" size={12} /> Eskaliert
       </span>
       <span>◆ Pulsieren = eskaliert</span>
       <span>Ziehen = drehen · Scrollen = zoomen</span>

@@ -18,8 +18,6 @@ from ..config import settings
 from .base import Notifier, NotifierError, RiskMessage
 
 GRAPH = "https://graph.microsoft.com/v1.0"
-LIGHT_DE = {"green": "Grün", "yellow": "Gelb", "red": "Rot"}
-LIGHT_COLOR = {"green": "#0ca30c", "yellow": "#b07800", "red": "#d03b3b"}
 
 _token: dict = {"value": "", "expires": 0.0}
 
@@ -52,9 +50,8 @@ def render_html(m: RiskMessage) -> str:
     return f"""
 <div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1b1b1b">
   <p>Hallo {escape(m.recipient_name)},</p>
-  <p>das Frühwarnsystem hat den Lieferanten <b>{escape(m.supplier_name)}</b> ({escape(m.supplier_number)})
-     mit <b style="color:{LIGHT_COLOR.get(m.traffic_light, '#1b1b1b')}">{LIGHT_DE.get(m.traffic_light, m.traffic_light)}</b>
-     (Risiko-Score {m.score}/100) bewertet.</p>
+  <p>das Frühwarnsystem hat beim Lieferanten <b>{escape(m.supplier_name)}</b> ({escape(m.supplier_number)})
+     ein finanzielles Risiko erkannt und den Fall an dich eskaliert.</p>
   <p>{escape(m.summary)}</p>
   <p><b>Empfehlung:</b> {escape(m.recommendation)}</p>
   <p><b>Maßnahmen:</b></p><ul>{measures}</ul>
@@ -84,7 +81,7 @@ class OutlookNotifier(Notifier):
                         "subject": message.subject,
                         "body": {"contentType": "HTML", "content": render_html(message)},
                         "toRecipients": [{"emailAddress": {"address": message.recipient_email, "name": message.recipient_name}}],
-                        "importance": "high" if message.traffic_light == "red" else "normal",
+                        "importance": "high",
                     },
                     "saveToSentItems": True,
                 },

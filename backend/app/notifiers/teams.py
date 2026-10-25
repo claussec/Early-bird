@@ -10,8 +10,6 @@ import httpx
 from ..config import settings
 from .base import Notifier, NotifierError, RiskMessage
 
-LIGHT_DE = {"green": "Grün", "yellow": "Gelb", "red": "Rot"}
-LIGHT_STYLE = {"green": "good", "yellow": "warning", "red": "attention"}
 
 
 def adaptive_card(m: RiskMessage) -> dict:
@@ -22,17 +20,16 @@ def adaptive_card(m: RiskMessage) -> dict:
         "body": [
             {
                 "type": "TextBlock",
-                "text": f"Frühwarnung {LIGHT_DE.get(m.traffic_light, m.traffic_light)}: {m.supplier_name}",
+                "text": f"Frühwarnung: {m.supplier_name}",
                 "weight": "Bolder",
                 "size": "Medium",
-                "color": LIGHT_STYLE.get(m.traffic_light, "default"),
+                "color": "attention",
                 "wrap": True,
             },
             {
                 "type": "FactSet",
                 "facts": [
                     {"title": "Lieferantennr.", "value": m.supplier_number},
-                    {"title": "Risiko-Score", "value": f"{m.score}/100"},
                     {"title": "Einkäufer", "value": f"{m.recipient_name} ({m.recipient_email})"},
                 ],
             },

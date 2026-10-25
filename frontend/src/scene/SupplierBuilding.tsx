@@ -2,7 +2,7 @@ import { Edges, Html, QuadraticBezierLine } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import { useMemo, useRef } from 'react'
 import * as THREE from 'three'
-import { GLOW, STATUS, fmtUnit, joinDot } from '../theme'
+import { GLOW, RISK, STATUS, fmtUnit, joinDot } from '../theme'
 import type { Light, Supplier } from '../types'
 
 interface Props {
@@ -23,7 +23,7 @@ export function buildingHeight(s: Supplier) {
 }
 
 export function SupplierBuilding({ supplier: s, x, z, dimmed, selected, hovered, onSelect, onHover }: Props) {
-  const light: Light = s.traffic_light ?? 'green'
+  const light: Light = RISK[s.status ?? 'none'].light
   const glow = GLOW[light]
   const h = buildingHeight(s)
   const opacity = dimmed ? 0.12 : 1
@@ -137,14 +137,11 @@ export function SupplierBuilding({ supplier: s, x, z, dimmed, selected, hovered,
         <Html position={[0, h + 3.2, 0]} center zIndexRange={[20, 10]}>
           <div className="glass pointer-events-none w-56 rounded-xl px-3 py-2 text-xs">
             <div className="font-semibold text-ink-1">{s.name}</div>
-            <div className="mt-0.5 text-ink-3">
-              {joinDot(s.city, s.country, s.commodity)}
-            </div>
+            <div className="mt-0.5 text-ink-3">{joinDot(s.city, s.country, s.commodity)}</div>
             <div className="mt-2 flex items-center gap-2">
               <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: STATUS[light].color }} />
-              <span className="text-ink-2">
-                {STATUS[light].label} · Score <b className="text-ink-1">{s.score}</b>
-              </span>
+              <span className="font-medium text-ink-1">{RISK[s.status ?? 'none'].label}</span>
+              {(s.risk_indicators ?? 0) > 0 && <span className="text-ink-3">· {s.risk_indicators} Risikoindikatoren</span>}
             </div>
             <div className="mt-1 grid grid-cols-2 gap-x-2 text-ink-3">
               <span>Customer-Share</span>
@@ -152,6 +149,9 @@ export function SupplierBuilding({ supplier: s, x, z, dimmed, selected, hovered,
               <span>PD (Coface)</span>
               <span className="text-right text-ink-2">{fmtUnit(s.pd, '%', 2)}</span>
             </div>
+            {s.recommendation && s.status !== 'none' && (
+              <div className="mt-2 border-t border-line pt-1.5 text-ink-2">{s.recommendation}</div>
+            )}
           </div>
         </Html>
       )}
@@ -168,7 +168,14 @@ export function FlowLine({ x, z, light, dimmed }: { x: number; z: number; light:
     v.y = 0.25
     return v
   }, [x, z])
-  const mid = useMemo(() => start.clone().lerp(end, 0.5).setY(start.distanceTo(end) * 0.28), [start, end])
+  const mid = useMemo(
+    () =>
+      start
+        .clone()
+        .lerp(end, 0.5)
+        .setY(start.distanceTo(end) * 0.28),
+    [start, end],
+  )
   const curve = useMemo(() => new THREE.QuadraticBezierCurve3(start, mid, end), [start, mid, end])
   const offset = useMemo(() => Math.random(), [])
   const speed = light === 'red' ? 0.12 : 0.22

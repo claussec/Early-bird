@@ -1,5 +1,8 @@
 export type Light = 'green' | 'yellow' | 'red'
 
+/** Result of the two decisions in Figure 2: "Risk?" (Internal Data agent) and "Escalation?" (Decision Maker). */
+export type RiskStatus = 'none' | 'risk' | 'escalated'
+
 export interface Buyer {
   name: string
   email: string
@@ -16,9 +19,10 @@ export interface Supplier {
   buyer: Buyer
   register_status: Light
   source: string
-  score?: number
-  traffic_light?: Light
+  status?: RiskStatus
   escalate?: boolean
+  risk_indicators?: number
+  recommendation?: string
   assessed_at?: string
   as_of?: string
   customer_share?: number | null
@@ -48,12 +52,14 @@ export interface Indicator {
   label: string
   group: string
   type: 'risk' | 'success' | 'neutral'
-  severity: number
-  weight: number
-  points: number
+  /** Risk indicators: "strong" above the critical threshold, "weak" above the warning threshold. */
+  strength: 'strong' | 'weak' | null
+  /** Financial signals are prioritized over external and operational ones. */
+  priority: 'finanziell' | 'extern' | 'operativ'
   value: string
   source: string
   evidence: string
+  severity?: number
   date?: string
   url?: string
   category?: string
@@ -82,6 +88,8 @@ export interface Report {
   created_at: string
   llm: string
   as_of: string
+  status: RiskStatus
+  risk_check: { risk: boolean; reasoning: string; method: string }
   kpis: Kpi[]
   forecast: { year: number; revenue: number; purchase: number; customer_share: number }[]
   series: {
@@ -96,21 +104,13 @@ export interface Report {
   external_origin: string
   indicators: Indicator[]
   combinations: Combination[]
-  scoring: {
-    score: number
-    traffic_light: Light
-    risk_points: number
-    success_points: number
-    combination_points: number
-    formula: string
-  }
   argumentation: {
     summary: string
     arguments: { title: string; direction: 'risk' | 'success'; reasoning: string; indicator_ids: string[] }[]
     recommendation: string
     measures: string[]
   }
-  decision: { traffic_light: Light; escalate: boolean; confidence: string; justification: string }
+  decision: { escalate: boolean; confidence: string; justification: string }
   missing_sources: string[]
   deliveries: Notification[]
 }
@@ -118,7 +118,7 @@ export interface Report {
 export interface SupplierDetail {
   supplier: Supplier
   report: Report | null
-  history: { created_at: string; score: number; traffic_light: Light; llm: string }[]
+  history: { created_at: string; status: RiskStatus; llm: string }[]
 }
 
 export interface Notification {
@@ -185,13 +185,13 @@ export type Target = 'server' | 'artifact'
 export type AgentMode = 'claude' | 'rules'
 
 export interface StepState {
-  status: 'pending' | 'running' | 'done'
+  status: 'pending' | 'running' | 'done' | 'skipped'
   summary: string
 }
 
 export interface Filters {
   query: string
-  lights: Light[]
+  statuses: RiskStatus[]
   commodities: string[]
   countries: string[]
   escalatedOnly: boolean
@@ -202,10 +202,9 @@ export interface Filters {
 export interface StreamEvent {
   type: string
   step?: string
-  status?: StepState['status']
+  /** Step events: the step's state; `supplier_done`: the supplier's RiskStatus. */
+  status?: StepState['status'] | RiskStatus
   summary?: string
   supplier_id?: string
   name?: string
-  traffic_light?: Light
-  score?: number
 }

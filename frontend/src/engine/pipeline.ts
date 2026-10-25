@@ -1,18 +1,22 @@
 /**
  * One evaluation of a supplier through all modules (Figure 2), in the browser.
  * TypeScript port of backend/app/pipeline.py for the artifact variant.
+ *
+ * Internal Module → "Risk?" (AI Agent Internal Data): no → evaluation next quarter;
+ * yes → External Module → Decision Module (Figure 4) → "Escalation?" → buyer / result storage.
  */
-import type { ExternalDoc, Light, Report, StreamEvent, Supplier } from '../types'
+import type { ExternalDoc, Report, StepState, StreamEvent, Supplier } from '../types'
 import * as dm from './decision'
 import { computeKpis, type InternalData } from './internal'
 
 export const STEPS: [string, string, string][] = [
   ['internal', 'Internal Module', 'Interne Daten sammeln & KPIs berechnen'],
+  ['risk', 'Risk?', 'AI Agent Internal Data: liegt ein Risiko vor?'],
   ['external', 'External Module', 'Web-Signale auswerten'],
   ['mapping', 'Mapping Indicators', 'Datenpunkte → Risiko-/Erfolgsindikatoren'],
-  ['crossref', 'Cross-Referencing', 'Indikatoren relativieren & kombinieren'],
+  ['crossref', 'Cross-Referencing', 'Indikatoren relativieren, abwägen, Finanzsignale priorisieren'],
   ['argumentation', 'Argumentation Generation', 'Nachvollziehbare Argumentationskette'],
-  ['decision', 'AI Decision Making', 'Ampel & Eskalationsentscheidung'],
+  ['decision', 'AI Decision Making', 'Escalation? und Empfehlung'],
   ['escalation', 'Escalation', 'Benachrichtigung des Einkäufers'],
 ]
 
@@ -35,8 +39,26 @@ export interface PipelineOptions {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 export async function runPipeline({ supplier, internal, external }: PipelineInput, opts: PipelineOptions): Promise<Report> {
-  const emit = (step: string, status: 'running' | 'done', summary = '') => opts.onEvent?.({ type: 'step', step, status, summary })
+  const emit = (step: string, status: StepState['status'], summary = '') => opts.onEvent?.({ type: 'step', step, status, summary })
   const pause = () => (opts.pace ? sleep(opts.pace) : Promise.resolve())
+  let llmUsed = false
+  /** Asks Claude and validates the answer; falls back to the rule-based result. */
+  async function agent<T>(prompt: string, validate: (v: unknown) => T | null, fallback: () => T): Promise<[T, string]> {
+    if (opts.ai) {
+      try {
+        const v = validate(await opts.ai(prompt))
+        if (v) {
+          llmUsed = true
+          return [v, opts.aiLabel]
+        }
+      } catch {
+        /* rule-based fallback */
+      }
+    } else {
+      await pause()
+    }
+    return [fallback(), 'Regelbasiert']
+  }
 
   emit('internal', 'running')
   await pause()
@@ -48,6 +70,50 @@ export async function runPipeline({ supplier, internal, external }: PipelineInpu
     'done',
     `${result.kpis.length} KPIs berechnet, ${flagged} auffällig` + (missing.length ? `. Keine Daten aus: ${missing.join(', ')}` : ''),
   )
+
+  emit('risk', 'running')
+  const [check, riskMethod] = result.kpis.length
+    ? await agent(
+        dm.riskPrompt(supplier, result.kpis),
+        (v) => (dm.validRiskCheck(v) ? v : null),
+        () => dm.ruleRiskCheck(result.kpis),
+      )
+    : [dm.ruleRiskCheck(result.kpis), 'Regelbasiert']
+  emit('risk', 'done', `${check.risk ? 'Ja' : 'Nein'} – ${check.reasoning} (${riskMethod})`)
+
+  const report = (fields: Pick<Report, 'indicators' | 'combinations' | 'argumentation' | 'decision' | 'external_origin'>): Report => ({
+    supplier_id: supplier.id,
+    created_at: new Date().toISOString().slice(0, 19) + '+00:00',
+    llm: llmUsed ? opts.aiLabel : 'Regelbasiert (ohne LLM)',
+    as_of: result.as_of,
+    status: fields.decision.escalate ? 'escalated' : check.risk ? 'risk' : 'none',
+    kpis: result.kpis,
+    forecast: result.forecast,
+    series: result.series,
+    risk_check: { ...check, method: riskMethod },
+    external,
+    missing_sources: missing,
+    deliveries: [],
+    ...fields,
+  })
+
+  if (!check.risk) {
+    // Figure 2: no risk → "Risk Evaluation next quarter"; the Decision Module is not needed.
+    for (const step of ['external', 'mapping', 'crossref', 'argumentation', 'decision', 'escalation'])
+      emit(step, 'skipped', 'Nicht erforderlich (Risk? = nein)')
+    return report({
+      indicators: [],
+      combinations: [],
+      external_origin: 'Nicht ausgewertet (Risk? = nein)',
+      argumentation: {
+        summary: check.reasoning,
+        arguments: [],
+        recommendation: 'Keine Maßnahme erforderlich – Risikobewertung im nächsten Quartal.',
+        measures: [],
+      },
+      decision: { escalate: false, confidence: 'medium', justification: 'Keine Eskalation, da kein Risiko vorliegt (Risk? = nein).' },
+    })
+  }
 
   emit('external', 'running')
   await pause()
@@ -67,60 +133,27 @@ export async function runPipeline({ supplier, internal, external }: PipelineInpu
   emit('crossref', 'running')
   await pause()
   const combos = dm.crossReference(indicators)
-  const scoring = dm.score(indicators, combos)
-  emit('crossref', 'done', `${combos.length} kritische Kombination(en), Score ${scoring.score}/100`)
+  const nFin = indicators.filter((i) => i.type === 'risk' && i.priority === 'finanziell').length
+  emit('crossref', 'done', `${combos.length} kritische Kombination(en), ${nFin} finanzielle Risikoindikator(en) priorisiert`)
 
   emit('argumentation', 'running')
-  let argumentation = dm.templateArgumentation(indicators, combos, scoring.traffic_light)
-  let argMethod = 'Regelbasierte Vorlage'
-  let llmUsed = false
-  if (opts.ai) {
-    try {
-      const v = await opts.ai(dm.argumentationPrompt(supplier, indicators, combos, scoring))
-      if (dm.validArgumentation(v)) {
-        argumentation = { ...v, measures: v.measures.map(String).slice(0, 5) }
-        argMethod = opts.aiLabel
-        llmUsed = true
-      }
-    } catch {
-      /* rule-based fallback */
-    }
-  } else {
-    await pause()
-  }
+  const [argumentation, argMethod] = await agent(
+    dm.argumentationPrompt(supplier, indicators, combos),
+    (v) => (dm.validArgumentation(v) ? { ...v, measures: v.measures.map(String).slice(0, 5) } : null),
+    () => dm.templateArgumentation(indicators, combos),
+  )
   emit('argumentation', 'done', `${argumentation.arguments.length} Argumente (${argMethod})`)
 
   emit('decision', 'running')
-  const baseline = dm.ruleDecision(scoring, supplier.register_status, combos)
-  let decision = baseline
-  let decMethod = 'Regelbasiert'
-  if (opts.ai) {
-    try {
-      const guarded = dm.guardDecision(
-        await opts.ai(dm.decisionPrompt(supplier, scoring, argumentation)),
-        baseline,
-        supplier.register_status,
-      )
-      if (guarded) {
-        decision = guarded
-        decMethod = opts.aiLabel
-        llmUsed = true
-      }
-    } catch {
-      /* rule-based fallback */
-    }
-  } else {
-    await pause()
-  }
+  const [agentDecision, decMethod] = await agent(dm.decisionPrompt(supplier, argumentation), dm.validDecision, () =>
+    dm.ruleDecision(indicators, combos, supplier.register_status),
+  )
+  let decision = agentDecision
   if (missing.length) {
     decision = { ...decision, justification: `${decision.justification} Datenlage unvollständig – fehlend: ${missing.join(', ')}.` }
     if (missing.length >= 2) decision.confidence = 'low'
   }
-  emit(
-    'decision',
-    'done',
-    `Ampel ${dm.LIGHT_DE[decision.traffic_light as Light]}, Eskalation: ${decision.escalate ? 'ja' : 'nein'} (${decMethod})`,
-  )
+  emit('decision', 'done', `Escalation? ${decision.escalate ? 'Ja' : 'Nein'} (${decMethod})`)
 
   emit('escalation', 'running')
   await pause()
@@ -132,22 +165,11 @@ export async function runPipeline({ supplier, internal, external }: PipelineInpu
       : 'Keine Eskalation – Ergebnis gespeichert',
   )
 
-  return {
-    supplier_id: supplier.id,
-    created_at: new Date().toISOString().slice(0, 19) + '+00:00',
-    llm: llmUsed ? opts.aiLabel : 'Regelbasiert (ohne LLM)',
-    as_of: result.as_of,
-    kpis: result.kpis,
-    forecast: result.forecast,
-    series: result.series,
-    external,
-    external_origin: external.length ? `Gespeicherte Web-Signale: ${external.length}` : 'Keine Web-Signale hinterlegt',
+  return report({
     indicators,
     combinations: combos,
-    scoring,
+    external_origin: external.length ? `Gespeicherte Web-Signale: ${external.length}` : 'Keine Web-Signale hinterlegt',
     argumentation,
     decision,
-    missing_sources: missing,
-    deliveries: [],
-  }
+  })
 }

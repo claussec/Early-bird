@@ -4,7 +4,7 @@
 
 > Claussen, C.; Haas, F.; Schätter, F.: *Early Detection of Financially Critical Suppliers with Artificial Intelligence: A Design-Oriented Case Study in Automotive Purchasing.* Hochschule Pforzheim.
 
-Ein Agentensystem bewertet alle hinterlegten Lieferanten. Es verknüpft interne Kennzahlen (Customer-Share, Umsatzentwicklung, Planvolumen, Coface-PD, Qualität) mit externen Web-Informationen. Daraus entstehen eine nachvollziehbare Argumentationskette und eine Ampel. Bei einer Eskalation wird der verantwortliche Einkäufer benachrichtigt, im Automode auch per Outlook und Teams.
+Ein Agentensystem bewertet alle hinterlegten Lieferanten. Es verknüpft interne Kennzahlen (Customer-Share, Umsatzentwicklung, Planvolumen, Coface-PD, Qualität) mit externen Web-Informationen. Wie im Paper entscheidet der Agent „Internal Data“ zuerst **„Risk?“**. Liegt ein Risiko vor, erzeugt das Decision Module eine **nachvollziehbare Argumentationskette** und entscheidet **„Escalation?“**, mit einer handlungsorientierten Empfehlung. Einen numerischen Score gibt es bewusst nicht. Bei einer Eskalation wird der verantwortliche Einkäufer benachrichtigt, im Automode auch per Outlook und Teams.
 
 Das 3D-Cockpit zeigt das Werk des Abnehmers in der Mitte und die Lieferanten als Gebäude ringsum, gruppiert nach Warengruppe. Du kannst nach Name oder Lieferantennummer suchen, filtern und neue Lieferanten direkt anlegen.
 
@@ -38,7 +38,15 @@ Gebaut wird die Online-Version mit `cd frontend && npm run build:artifact`. Alle
 | Regelmäßige, automatische Bewertung (z. B. quartalsweise) | `backend/app/automode.py` |
 | Offline-LLM für interne Daten | `LLM_PROVIDER=ollama` |
 
-**Designentscheidung: Code rechnet, KI argumentiert.** KPIs, Prognose und Score werden deterministisch im Code berechnet. Die LLM-Agenten übernehmen drei Aufgaben: Web-Dokumente klassifizieren, die Argumentationskette formulieren und die Ampel entscheiden. Dabei dürfen sie höchstens eine Stufe vom regelbasierten Score abweichen und müssen das begründen. Ohne LLM (`LLM_PROVIDER=demo`) laufen alle Agenten regelbasiert.
+**Ablauf wie im Paper (Figure 2 und 4), ohne Score:**
+
+1. **Internal Module:** KPIs mit Formel, Schwelle und Quelle.
+2. **Risk?** (AI Agent Internal Data): Bei Nein folgt „Risikobewertung im nächsten Quartal“ und der Lauf endet. Bei Ja geht es weiter.
+3. **External Module:** Web-Signale.
+4. **Decision Module:** Mapping Indicators (Risiko-/Erfolgsindikator, deutlich/schwach) → Cross-Referencing (relativieren, abwägen, Finanzsignale vor Qualität priorisieren, Kombinationen) → Argumentation Generation → AI Decision Making: **Escalation?** + Empfehlung.
+5. **Escalation:** Ja geht an den Einkäufer, Nein in den Result Data Storage.
+
+KPIs und Prognose werden deterministisch im Code berechnet, damit jede Zahl nachvollziehbar bleibt. Die LLM-Agenten treffen die Entscheidungen und formulieren die Argumente. Ohne LLM (`LLM_PROVIDER=demo`) entscheiden transparente Regeln: Eskaliert wird bei einer kritischen Kombination oder einem finanziellen Indikator deutlich über seiner Schwelle. Qualitätsindikatoren allein führen nicht zur Eskalation.
 
 ## Lieferanten erfassen und suchen
 
@@ -46,7 +54,7 @@ Gebaut wird die Online-Version mit `cd frontend && npm run build:artifact`. Alle
   - Pflicht sind nur Lieferantennummer und Name.
   - Optional erfasst du Kennzahlen: Spend Cube der letzten drei Jahre, Planvolumen, Coface-PD aktuell und vor 12 Monaten, Reklamationen und Liefertreue.
   - Direkt nach dem Speichern bewerten die Agenten den Lieferanten. Fehlen Datenquellen, weist die Bewertung das sichtbar aus.
-- **Suche:** Das Suchfeld filtert nach Name und Lieferantennummer, außerdem nach Ort, Warengruppe und Einkäufer. Weitere Filter: Ampel, Warengruppe, Land, Eskalationen, Customer-Share ≥ 50 % und Mindest-PD.
+- **Suche:** Das Suchfeld filtert nach Name und Lieferantennummer, außerdem nach Ort, Warengruppe und Einkäufer. Weitere Filter: Ergebnis (Eskaliert / Risiko erkannt / Kein Risiko), Warengruppe, Land, Eskalationen, Customer-Share ≥ 50 % und Mindest-PD.
 - **Über die API:** `POST /api/suppliers` (Stammdaten + optionale `figures`) oder `POST /api/suppliers/import` (aus einem Quellsystem, siehe unten).
 
 ## Schnittstellen (Backend)
@@ -89,7 +97,7 @@ POST /api/suppliers/import  {"source": "sap", "number": "100200", "buyer_email":
 | Outlook über Microsoft Graph `sendMail` | `outlook` | App-Registrierung in Entra ID mit Application-Permission `Mail.Send` (Admin-Consent; per Application Access Policy auf das Absender-Postfach beschränken) → `MS_TENANT_ID`, `MS_CLIENT_ID`, `MS_CLIENT_SECRET`, `OUTLOOK_SENDER` |
 | Microsoft Teams (Adaptive Card) | `teams` | Im Kanal: *Workflows → „Post to a channel when a webhook request is received“* → URL als `TEAMS_WEBHOOK_URL` |
 
-Die Mail geht an die E-Mail-Adresse des Einkäufers aus den Stammdaten. Mail und Teams-Karte enthalten Score, Empfehlung, Maßnahmen und einen Direktlink (`APP_BASE_URL/?supplier=…`). Jeder Zustellversuch wird mit Status protokolliert (`GET /api/notifications`).
+Die Mail geht an die E-Mail-Adresse des Einkäufers aus den Stammdaten. Mail und Teams-Karte enthalten Zusammenfassung, Empfehlung, Maßnahmen und einen Direktlink (`APP_BASE_URL/?supplier=…`). Jeder Zustellversuch wird mit Status protokolliert (`GET /api/notifications`).
 
 ### Automode
 
@@ -148,7 +156,7 @@ So liefern Quellsysteme die Kennzahlen (`get_internal_data` bzw. `GET /suppliers
 }
 ```
 
-Die Schwellenwerte stehen zentral in `THRESHOLDS` (`internal_module.py`), die Gewichte in `GROUP_WEIGHTS` (`decision_module.py`).
+Die Schwellenwerte stehen zentral in `THRESHOLDS` (`internal_module.py`). Bis auf die 50-%-Grenze beim Customer-Share und den gelben Bereich der Coface-PD (~2 %) aus dem Paper sind es Annahmen, die an die internen Limits angepasst werden sollten. Die Priorisierung (finanziell vor extern vor operativ) und die Eskalationsregel stehen in `decision_module.py`.
 
 ## API-Übersicht
 

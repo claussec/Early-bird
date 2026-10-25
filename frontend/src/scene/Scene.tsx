@@ -3,6 +3,7 @@ import { Canvas } from '@react-three/fiber'
 import { Bloom, EffectComposer, Vignette } from '@react-three/postprocessing'
 import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
+import { RISK } from '../theme'
 import type { Supplier } from '../types'
 import { SECTOR_RADIUS, layoutSuppliers } from './layout'
 import { Plant } from './Plant'
@@ -111,7 +112,7 @@ export function Scene({ suppliers, commodities, visible, selectedId, hoveredId, 
         const dimmed = !visible.has(s.id)
         return (
           <group key={s.id}>
-            <FlowLine x={p.x} z={p.z} light={s.traffic_light ?? 'green'} dimmed={dimmed} />
+            <FlowLine x={p.x} z={p.z} light={RISK[s.status ?? 'none'].light} dimmed={dimmed} />
             <SupplierBuilding
               supplier={s}
               x={p.x}

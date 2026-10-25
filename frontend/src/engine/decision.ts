@@ -1,30 +1,55 @@
 /**
- * Decision Module (Figure 4) – TypeScript port of backend/app/modules/decision_module.py
+ * Decision Module (Figure 4) and the Internal Data agent's "Risk?" check (Figure 2) –
+ * TypeScript port of backend/app/modules/decision_module.py and internal_module.risk_check
  * for the artifact variant. Keep both in sync.
+ *
+ * Following the paper there is no numeric score: the result is the argumentation and the
+ * decisions "Risk?" and "Escalation?".
  */
 import type { Combination, ExternalDoc, Indicator, Kpi, Light, Report } from '../types'
 
-export const GROUP_WEIGHTS: Record<string, number> = {
-  Rating: 1.0,
-  Umsatz: 0.9,
-  Abhängigkeit: 0.9,
-  Planung: 0.7,
-  Extern: 0.6,
-  Qualität: 0.4,
-}
-const KPI_WEIGHT_OVERRIDES: Record<string, number> = { rating_gap: 0.5, revenue_cagr: 0.6 }
-const STATUS_SEVERITY: Record<string, number> = { critical: 1.0, warn: 0.5 }
-const COMBINATION_BONUS = 0.75
-const SCORE_SCALE = 3.0
-export const LIGHTS: Light[] = ['green', 'yellow', 'red']
+const FINANCIAL_GROUPS = ['Rating', 'Umsatz', 'Abhängigkeit', 'Planung']
+const PRIORITY: Record<Indicator['priority'], number> = { finanziell: 0, extern: 1, operativ: 2 }
 export const LIGHT_DE: Record<Light, string> = { green: 'Grün', yellow: 'Gelb', red: 'Rot' }
+const STRENGTH_DE = { strong: 'deutlich', weak: 'schwach' }
+const EXTERNAL_MAX_AGE_YEARS = 2
 
-const round = (v: number, d: number) => Math.round(v * 10 ** d) / 10 ** d
-const fmt = (v: number, d = 2) => v.toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d })
+export type RiskCheck = { risk: boolean; reasoning: string }
+export type Argumentation = Report['argumentation']
+export type Decision = Report['decision']
 
-export const lightFor = (score: number): Light => (score >= 60 ? 'red' : score >= 35 ? 'yellow' : 'green')
+// --- AI Agent "Internal Data": Risk? ---------------------------------------------------
 
-// --- Step 1: Mapping indicators -------------------------------------------------------
+export function ruleRiskCheck(kpis: Kpi[]): RiskCheck {
+  if (!kpis.length) return { risk: false, reasoning: 'Keine internen Kennzahlen vorhanden – Neubewertung im nächsten Quartal.' }
+  const flagged = kpis.filter((k) => k.status !== 'ok')
+  if (!flagged.length)
+    return { risk: false, reasoning: 'Alle Kennzahlen liegen innerhalb ihrer Schwellen – Neubewertung im nächsten Quartal.' }
+  const listed = flagged
+    .slice(0, 5)
+    .map((k) => `${k.label} ${k.value} ${k.unit} (Schwelle: ${k.threshold})`)
+    .join('; ')
+  return { risk: true, reasoning: `${flagged.length} Kennzahl(en) über ihrer Schwelle: ${listed}.` }
+}
+
+export function riskPrompt(supplier: { name: string; commodity: string }, kpis: Kpi[]) {
+  return `Du bist der AI Agent "Internal Data" eines Frühwarnsystems für finanziell kritische Lieferanten im Automotive-Einkauf. Du erhältst die aus internen Systemen berechneten Kennzahlen eines Lieferanten mit Formel, Schwelle und Quelle. Entscheide, ob Hinweise auf ein finanzielles Risiko vorliegen (risk = true), sodass der Lieferant im Decision Module vertieft analysiert wird, oder ob er erst im nächsten Quartal erneut bewertet wird (risk = false). Begründe kurz und sachlich auf Deutsch mit den konkreten Kennzahlen. Erfinde keine Werte und vergib keinen Score.
+
+Lieferant: ${supplier.name} (${supplier.commodity}).
+
+Kennzahlen:
+${kpis.map((k) => `- ${k.label}: ${k.value} ${k.unit} – ${k.formula} (Schwelle: ${k.threshold}; Quelle: ${k.source})`).join('\n')}
+
+Antworte nur mit JSON in genau dieser Form:
+{"risk": boolean, "reasoning": string}`
+}
+
+export function validRiskCheck(v: unknown): v is RiskCheck {
+  const r = v as RiskCheck
+  return !!r && typeof r.risk === 'boolean' && typeof r.reasoning === 'string'
+}
+
+// --- Step 1: Mapping indicators (standardized matrix) ---------------------------------
 
 function isSuccess(k: Kpi) {
   const v = k.value
@@ -42,47 +67,49 @@ function isSuccess(k: Kpi) {
 
 export function mapIndicators(kpis: Kpi[], external: ExternalDoc[], asOf: string): Indicator[] {
   const indicators: Indicator[] = kpis.map((k) => {
-    const weight = KPI_WEIGHT_OVERRIDES[k.id] ?? GROUP_WEIGHTS[k.group]
     let type: Indicator['type'] = 'neutral'
-    let severity = 0
-    if (k.status in STATUS_SEVERITY) {
+    let strength: Indicator['strength'] = null
+    if (k.status === 'critical' || k.status === 'warn') {
       type = 'risk'
-      severity = STATUS_SEVERITY[k.status]
+      strength = k.status === 'critical' ? 'strong' : 'weak'
     } else if (isSuccess(k)) {
       type = 'success'
-      severity = 0.5
+      strength = 'weak'
     }
     return {
       id: k.id,
       label: k.label,
       group: k.group,
       type,
-      severity,
-      weight,
-      points: round(weight * severity, 2),
+      strength,
+      priority: FINANCIAL_GROUPS.includes(k.group) ? 'finanziell' : 'operativ',
       value: `${k.value} ${k.unit}`,
       source: k.source,
-      evidence: k.formula,
+      evidence: `${k.formula} (Schwelle: ${k.threshold})`,
     }
   })
   const refYear = asOf ? Number(asOf.slice(0, 4)) : new Date().getFullYear()
   external.forEach((doc, i) => {
     if (doc.signal === 'neutral') return
-    const age = doc.date ? Math.max(0, refYear - Number(doc.date.slice(0, 4))) : 1
-    const recency = Math.max(0.25, 1 - 0.25 * age)
-    const severity = doc.severity / 3
+    const age = doc.date ? Math.max(0, refYear - Number(doc.date.slice(0, 4))) : null
+    let strength: Indicator['strength'] = doc.severity === 3 ? 'strong' : 'weak'
+    let note = ''
+    if (age !== null && age >= EXTERNAL_MAX_AGE_YEARS) {
+      strength = 'weak'
+      note = ` Meldung ist ${age} Jahre alt und wird daher schwächer gewichtet.`
+    }
     indicators.push({
       id: `ext_${i}`,
       label: doc.title,
       group: 'Extern',
       category: doc.category,
       type: doc.signal,
-      severity: round(severity, 2),
-      weight: round(GROUP_WEIGHTS.Extern * recency, 2),
-      points: round(GROUP_WEIGHTS.Extern * recency * severity, 2),
+      strength,
+      severity: doc.severity,
+      priority: 'extern',
       value: doc.category,
       source: doc.source || 'Web',
-      evidence: doc.rationale,
+      evidence: doc.rationale + note,
       date: doc.date,
       url: doc.url,
     })
@@ -91,6 +118,12 @@ export function mapIndicators(kpis: Kpi[], external: ExternalDoc[], asOf: string
 }
 
 // --- Step 2: Cross-referencing --------------------------------------------------------
+
+export function prioritized(indicators: Indicator[], type: Indicator['type']) {
+  return indicators
+    .filter((i) => i.type === type)
+    .sort((a, b) => PRIORITY[a.priority] - PRIORITY[b.priority] || (a.strength === 'strong' ? 0 : 1) - (b.strength === 'strong' ? 0 : 1))
+}
 
 export function crossReference(indicators: Indicator[]): Combination[] {
   const byId = Object.fromEntries(indicators.map((i) => [i.id, i]))
@@ -133,7 +166,8 @@ export function crossReference(indicators: Indicator[]): Combination[] {
       indicator_ids: [...extRisk.slice(0, 3), ...finRisk.slice(0, 2)].map((i) => i.id),
     })
   }
-  const severeExt = extRisk.filter((i) => i.severity >= 0.66)
+  // Web signals with at least a clear warning (severity 2 of 3).
+  const severeExt = extRisk.filter((i) => (i.severity ?? 1) >= 2)
   if (severeExt.length >= 2 && !finRisk.length) {
     combos.push({
       id: 'divergence',
@@ -146,26 +180,7 @@ export function crossReference(indicators: Indicator[]): Combination[] {
   return combos
 }
 
-export function score(indicators: Indicator[], combos: Combination[]): Report['scoring'] {
-  const riskPts = indicators.filter((i) => i.type === 'risk').reduce((a, i) => a + i.points, 0)
-  const successPts = indicators.filter((i) => i.type === 'success').reduce((a, i) => a + i.points, 0)
-  const comboPts = COMBINATION_BONUS * combos.length
-  const total = Math.max(0, riskPts + comboPts - 0.5 * successPts)
-  const value = Math.round(100 * (1 - Math.exp(-total / SCORE_SCALE)))
-  return {
-    score: value,
-    traffic_light: lightFor(value),
-    risk_points: round(riskPts, 2),
-    success_points: round(successPts, 2),
-    combination_points: round(comboPts, 2),
-    formula: `Score = 100 · (1 − e^(−(${fmt(riskPts)} + ${fmt(comboPts)} − 0,5 · ${fmt(successPts)}) / ${fmt(SCORE_SCALE, 1)}))`,
-  }
-}
-
 // --- Step 3: Argumentation ------------------------------------------------------------
-
-export type Argumentation = Report['argumentation']
-export type Decision = Report['decision']
 
 const MEASURES: Record<string, string> = {
   customer_share: 'Abhängigkeit reduzieren: Volumenplanung und Mengenzusagen mit dem Lieferanten abstimmen',
@@ -179,26 +194,39 @@ const MEASURES: Record<string, string> = {
   otd: 'Liefertreue im Lieferantengespräch adressieren',
 }
 
-export function templateArgumentation(indicators: Indicator[], combos: Combination[], light: Light): Argumentation {
+/**
+ * Transparent escalation rule without an LLM: at least one combination from the
+ * cross-referencing, or a financial (or financially relevant external) risk indicator clearly
+ * above its threshold. Quality indicators alone never escalate.
+ */
+export function escalationTriggers(indicators: Indicator[], combos: Combination[]): string[] {
+  const triggers = combos.map((c) => `Kombination „${c.title}“`)
+  for (const i of prioritized(indicators, 'risk')) {
+    if (i.strength === 'strong' && (i.priority === 'finanziell' || i.priority === 'extern')) {
+      triggers.push(i.priority === 'finanziell' ? `${i.label} (${i.value})` : `Web-Meldung: ${i.label}`)
+    }
+  }
+  return triggers
+}
+
+export function templateArgumentation(indicators: Indicator[], combos: Combination[]): Argumentation {
   const args: Argumentation['arguments'] = []
   const covered = new Set<string>()
   combos.forEach((c) => {
     args.push({ title: c.title, direction: 'risk', reasoning: c.description, indicator_ids: c.indicator_ids })
     c.indicator_ids.forEach((id) => covered.add(id))
   })
-  const risks = indicators.filter((i) => i.type === 'risk').sort((a, b) => b.points - a.points)
+  const risks = prioritized(indicators, 'risk')
   for (const i of risks) {
     if (covered.has(i.id) || args.length >= 6) continue
     args.push({
       title: i.label,
       direction: 'risk',
-      reasoning: `${i.label}: ${i.value}. ${i.evidence} (Quelle: ${i.source}).`,
+      reasoning: `${i.label}: ${i.value}, Risikoindikator (${STRENGTH_DE[i.strength ?? 'weak']}). ${i.evidence} (Quelle: ${i.source}).`,
       indicator_ids: [i.id],
     })
   }
-  indicators
-    .filter((i) => i.type === 'success')
-    .sort((a, b) => b.points - a.points)
+  prioritized(indicators, 'success')
     .slice(0, 3)
     .forEach((i) =>
       args.push({
@@ -213,51 +241,52 @@ export function templateArgumentation(indicators: Indicator[], combos: Combinati
     const m = MEASURES[i.id] ?? MEASURES[i.group]
     if (m && !measures.includes(m)) measures.push(m)
   }
+  const financial = risks.filter((i) => i.priority === 'finanziell')
+  let recommendation: string
+  if (escalationTriggers(indicators, combos).length) {
+    recommendation =
+      combos.some((c) => c.id === 'dependency_decline') || financial.filter((i) => i.strength === 'strong').length >= 3
+        ? 'Sorgfältige Neubewertung des Lieferanten durch den Einkäufer; Phase-out bzw. Dual-Sourcing prüfen und das zentrale Risikomanagement einbinden.'
+        : 'Sorgfältige Neubewertung des Lieferanten: Lieferantengespräch führen und aktuelle Finanzunterlagen anfordern.'
+  } else {
+    recommendation = 'Auffälligkeiten beobachten und im nächsten Quartal erneut bewerten.'
+    measures = measures.slice(0, 2)
+  }
+  if (!measures.length) measures = ['Entwicklung im nächsten Quartal erneut bewerten']
   const top =
     risks
       .slice(0, 3)
       .map((i) => i.label)
       .join(', ') || 'keine'
-  let recommendation: string
-  if (light === 'red') {
-    recommendation =
-      'Eskalation an den verantwortlichen Einkäufer: Lieferant sorgfältig neu bewerten, Phase-out bzw. Dual-Sourcing prüfen und das zentrale Risikomanagement einbinden.'
-  } else if (light === 'yellow') {
-    recommendation =
-      'Sorgfältige Neubewertung des Lieferanten: Lieferantengespräch führen, Finanzunterlagen anfordern und Entwicklung im nächsten Quartal eng beobachten.'
-  } else {
-    recommendation = 'Keine Maßnahme erforderlich – reguläres quartalsweises Monitoring fortsetzen.'
-    measures = measures.slice(0, 1)
-  }
-  if (!measures.length) measures = ['Reguläres Monitoring im nächsten Quartal']
   return {
-    summary: `${risks.length} Risikoindikator(en) und ${combos.length} kritische Kombination(en) identifiziert. Wichtigste Treiber: ${top}.`,
+    summary: `${risks.length} Risikoindikator(en), davon ${financial.length} finanziell, und ${combos.length} kritische Kombination(en). Wichtigste Treiber: ${top}.`,
     arguments: args,
     recommendation,
     measures: measures.slice(0, 5),
   }
 }
 
-export function ruleDecision(scoring: Report['scoring'], registerStatus: Light, combos: Combination[]): Decision {
-  const light = scoring.traffic_light
-  const worse = LIGHTS.indexOf(light) > LIGHTS.indexOf(registerStatus)
-  const reasons = [`Score ${scoring.score}/100 → ${LIGHT_DE[light]}`]
-  if (worse) reasons.push(`Verschlechterung gegenüber Risikoregister (${LIGHT_DE[registerStatus]} → ${LIGHT_DE[light]})`)
-  if (combos.length) reasons.push(`${combos.length} kritische Indikator-Kombination(en)`)
-  return {
-    traffic_light: light,
-    escalate: light === 'red' || worse,
-    confidence: Math.abs(scoring.score - 47) > 20 ? 'high' : 'medium',
-    justification: reasons.join('; ') + '.',
+export function ruleDecision(indicators: Indicator[], combos: Combination[], registerStatus: Light): Decision {
+  const triggers = escalationTriggers(indicators, combos)
+  let justification: string
+  if (triggers.length) {
+    justification = `Eskalation, ausschlaggebend: ${triggers.slice(0, 4).join('; ')}.`
+    if (registerStatus === 'red') justification += ' Der Lieferant ist im internen Risikoregister bereits als Risikolieferant geführt.'
+  } else {
+    justification =
+      'Keine Eskalation: Kein finanzieller Indikator liegt deutlich über seiner Schwelle und das Cross-Referencing hat keine kritische Kombination ergeben.'
   }
+  return { escalate: triggers.length > 0, confidence: 'medium', justification }
 }
 
 // --- Prompts for the Claude agents (same instructions as the server's LLM agents) -------
 
-export function formatIndicators(indicators: Indicator[]) {
-  return indicators
-    .filter((i) => i.type !== 'neutral')
-    .map((i) => `- ${i.id} [${i.group}, ${i.type}, Punkte ${i.points}]: ${i.label} = ${i.value} (Quelle: ${i.source}; ${i.evidence})`)
+function formatIndicators(indicators: Indicator[]) {
+  return [...prioritized(indicators, 'risk'), ...prioritized(indicators, 'success')]
+    .map(
+      (i) =>
+        `- ${i.id} [${i.group}, ${i.type}, ${i.strength ? STRENGTH_DE[i.strength] : ''}, Priorität ${i.priority}]: ${i.label} = ${i.value} (Quelle: ${i.source}; ${i.evidence})`,
+    )
     .join('\n')
 }
 
@@ -265,15 +294,13 @@ export function argumentationPrompt(
   supplier: { name: string; commodity: string; register_status: Light },
   indicators: Indicator[],
   combos: Combination[],
-  scoring: Report['scoring'],
 ) {
-  return `Du bist der AI Agent "Decision Maker" eines Frühwarnsystems für finanziell kritische Lieferanten im Automotive-Einkauf. Du erhältst strukturierte, bereits berechnete Indikatoren (mit Formeln und Quellen) und Kombinationen. Erzeuge eine nachvollziehbare Argumentationskette für den verantwortlichen Einkäufer: Jedes Argument muss sich auf konkrete indicator_ids stützen. Priorisiere Finanzsignale vor Qualitätssignalen. Erfinde keine Zahlen; verwende nur die gelieferten Werte. Schreibe sachlich auf Deutsch. Gib eine handlungsorientierte Empfehlung und 2–5 konkrete Maßnahmen.
+  return `Du bist der AI Agent "Decision Maker" eines Frühwarnsystems für finanziell kritische Lieferanten im Automotive-Einkauf. Du erhältst strukturierte Risiko- und Erfolgsindikatoren (mit Werten, Schwellen und Quellen) sowie Kombinationen aus dem Cross-Referencing. Relativiere und gewichte die Indikatoren gegeneinander, priorisiere Finanzsignale vor Qualitätssignalen und erzeuge eine nachvollziehbare Argumentationskette für den verantwortlichen Einkäufer: Jedes Argument muss sich auf konkrete indicator_ids stützen. Berücksichtige auch stabilisierende Erfolgsindikatoren. Erfinde keine Zahlen; verwende nur die gelieferten Werte. Vergib keine Punkte und keinen Score. Schreibe sachlich auf Deutsch. Gib eine handlungsorientierte Empfehlung (z. B. sorgfältige Neubewertung, Phase-out prüfen, beobachten) und 2–5 konkrete Maßnahmen.
 
 Lieferant: ${supplier.name} (${supplier.commodity}), internes Risikoregister: ${LIGHT_DE[supplier.register_status]}.
-Regelbasierter Score: ${scoring.score}/100 (${LIGHT_DE[scoring.traffic_light]}).
 
-Indikatoren:
-${formatIndicators(indicators) || '(keine auffälligen Indikatoren)'}
+Indikatoren (priorisiert):
+${formatIndicators(indicators) || '(keine)'}
 
 Kombinationen:
 ${combos.map((c) => `- ${c.title}: ${c.description} (${c.indicator_ids.join(', ')})`).join('\n') || '(keine)'}
@@ -282,21 +309,17 @@ Antworte nur mit JSON in genau dieser Form:
 {"summary": string, "arguments": [{"title": string, "direction": "risk" | "success", "reasoning": string, "indicator_ids": [string]}], "recommendation": string, "measures": [string]}`
 }
 
-export function decisionPrompt(
-  supplier: { name: string; register_status: Light },
-  scoring: Report['scoring'],
-  argumentation: Argumentation,
-) {
-  return `Du bist der AI Agent "Decision Maker". Entscheide über die Ampel (green/yellow/red) und ob an den Einkäufer eskaliert wird. Der regelbasierte Score ist der Ausgangspunkt; du darfst höchstens um eine Stufe abweichen und musst jede Abweichung begründen. Eskaliere, wenn die Ampel rot ist oder sich die Einstufung gegenüber dem internen Risikoregister verschlechtert.
+export function decisionPrompt(supplier: { name: string; register_status: Light }, argumentation: Argumentation) {
+  return `Du bist der AI Agent "Decision Maker". Entscheide auf Basis der Argumentationskette, ob der Fall an den verantwortlichen Einkäufer eskaliert wird (Escalation? ja/nein). Eskaliere, wenn die Argumente auf ein relevantes finanzielles Risiko hindeuten, das Handeln des Einkäufers erfordert. Reine Qualitätsauffälligkeiten ohne finanzielle Signale sind kein Grund für eine Eskalation. Begründe die Entscheidung mit den ausschlaggebenden Argumenten und vergib keinen Score.
 
-Lieferant: ${supplier.name}. Internes Risikoregister: ${supplier.register_status}.
-Regelbasierter Score: ${scoring.score}/100 → ${scoring.traffic_light}.
+Lieferant: ${supplier.name}. Internes Risikoregister: ${LIGHT_DE[supplier.register_status]}.
 Zusammenfassung: ${argumentation.summary}
 Argumente:
 ${argumentation.arguments.map((a) => `- (${a.direction}) ${a.title}: ${a.reasoning}`).join('\n')}
+Empfehlung: ${argumentation.recommendation}
 
 Antworte nur mit JSON in genau dieser Form:
-{"traffic_light": "green" | "yellow" | "red", "escalate": boolean, "confidence": "low" | "medium" | "high", "justification": string}`
+{"escalate": boolean, "confidence": "low" | "medium" | "high", "justification": string}`
 }
 
 export function validArgumentation(v: unknown): v is Argumentation {
@@ -311,20 +334,12 @@ export function validArgumentation(v: unknown): v is Argumentation {
   )
 }
 
-/** Applies the guardrail: at most one level away from the rule-based light; escalation rules enforced. */
-export function guardDecision(v: unknown, baseline: Decision, registerStatus: Light): Decision | null {
+export function validDecision(v: unknown): Decision | null {
   const d = v as Decision
-  if (!d || !LIGHTS.includes(d.traffic_light) || typeof d.justification !== 'string') return null
-  const out: Decision = {
-    traffic_light: d.traffic_light,
-    escalate: !!d.escalate,
+  if (!d || typeof d.escalate !== 'boolean' || typeof d.justification !== 'string') return null
+  return {
+    escalate: d.escalate,
     confidence: ['low', 'medium', 'high'].includes(d.confidence) ? d.confidence : 'medium',
     justification: d.justification,
   }
-  if (Math.abs(LIGHTS.indexOf(out.traffic_light) - LIGHTS.indexOf(baseline.traffic_light)) > 1) {
-    out.traffic_light = 'yellow'
-    out.justification += ' (Begrenzt auf eine Stufe Abweichung vom regelbasierten Score.)'
-  }
-  if (out.traffic_light === 'red' || LIGHTS.indexOf(out.traffic_light) > LIGHTS.indexOf(registerStatus)) out.escalate = true
-  return out
 }
