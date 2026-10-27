@@ -8,3 +8,4 @@ dist/
 .DS_Store
 dist-artifact/
 dist-demo/
+demo-download/
