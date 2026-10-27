@@ -168,7 +168,7 @@ function PlantForm({ plant, onSaved, onCancel }: { plant?: Plant; onSaved: () =>
           <input required minLength={2} value={name} onChange={(e) => setName(e.target.value)} className={inputClass} placeholder={t('plants.name.ph')} />
         </Field>
         <section>
-          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-3">{t('form.address')}</h3>
+          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-3">{t('plants.address')}</h3>
           <AddressFields value={address} onChange={setAddress} manual={plant?.location?.precision === 'manual'} />
         </section>
         <section>

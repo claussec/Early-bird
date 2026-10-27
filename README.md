@@ -1,31 +1,40 @@
 # Supplier Risk Radar
 
-An agent system evaluates every supplier on record. It combines internal indicators (customer share, revenue development, planned purchasing volumes, Coface probability of default, quality) with information from the web. Following the underlying reference model, the *Internal Data* agent first decides **"Risk?"**. If a risk is present, the Decision Module builds a **traceable chain of argumentation** and decides **"Escalation?"**, together with an action-oriented recommendation. There is deliberately no numeric score. When a case is escalated, the responsible buyer is notified, in auto mode also via Outlook and Teams.
+An agent system evaluates every supplier on record. It combines internal indicators (customer share, revenue development, planned purchasing volumes, Coface probability of default, quality) with information from the web. Following the underlying reference model, the *Internal Data* agent first decides **"Risk?"**. If a risk is present, the Decision Module builds a **traceable chain of argumentation** and decides **"Escalation?"**, together with an action-oriented recommendation. There is deliberately no numeric score. When a case is escalated, the responsible buyer and the contacts of every plant the supplier delivers to are warned, in auto mode also via Outlook and Teams.
 
-The 3D cockpit shows the buying organisation's plant in the centre and the suppliers as buildings around it, grouped by commodity. Users can search by name or supplier number, filter the supplier base and add new suppliers directly.
+The cockpit offers three views:
 
-*The user interface is in German.*
+- **3D map:** countries as a dark relief, the organisation's plants as hubs, suppliers as buildings at their address, and an arc from every supplier to each plant it supplies.
+- **3D radar:** one plant in the centre, suppliers around it grouped by commodity.
+- **List:** a sortable table for quick comparison (CSV export).
 
-![Cockpit](docs/cockpit.png)
+Users can search, filter (also by plant), add and edit suppliers with their address, and manage the plants with their contacts. The interface and the texts the agents write switch between **German and English** (flags at the top right).
 
-| AI agents: workflow and decisions | Web research with Claude (online version) |
+![3D map](docs/map.png)
+
+| Supplier with chain of argumentation and recipients | AI agents: workflow and decisions |
 |---|---|
-| ![AI agents](docs/agents.png) | ![Web research](docs/web-research.png) |
+| ![Supplier](docs/detail.png) | ![AI agents](docs/agents.png) |
 
-| Adding a supplier | Auto mode |
+| List view | Plant with contacts for early warnings |
 |---|---|
-| ![Adding a supplier](docs/supplier-form.png) | ![Auto mode](docs/automode.png) |
+| ![List](docs/list.png) | ![Plant](docs/plant.png) |
 
-## Two variants
+| Editing a supplier (address, plants) | Web research with Claude (online version) |
+|---|---|
+| ![Supplier form](docs/supplier-form.png) | ![Web research](docs/web-research.png) |
 
-| | Server version | Online version (claude.ai artifact) |
-|---|---|---|
-| Start | `docker compose up`, or Python + Node | Open a link, no installation |
-| AI agents | Claude API, Ollama (offline) or rule-based | Claude via the viewer's own claude.ai account, or rule-based |
-| Web signals | Live crawling | Research prompt → Claude chat with web search → paste the answer back |
-| SAP/ERP, Outlook, Teams, auto mode | ✅ | – |
+## Three variants
 
-The online version is built with `cd frontend && npm run build:artifact`. All differences, and where they live in the code, are listed in [`docs/ARTIFACT_VARIANT.md`](docs/ARTIFACT_VARIANT.md).
+| | Server version | Online version (claude.ai artifact) | Standalone demo |
+|---|---|---|---|
+| Start | `docker compose up`, or Python + Node | Open a link, no installation | One HTML file, any web host or double-click |
+| AI agents | Claude API, Ollama (offline) or rule-based | Claude via the viewer's own claude.ai account, or rule-based | Rule-based |
+| Data | SQLite | Shared artifact database | Fictitious demo data in memory |
+| Web signals | Live crawling | Research prompt → Claude chat with web search → paste the answer back | Same prompt workflow |
+| SAP/ERP, Outlook, Teams, auto mode | ✅ | – | – |
+
+Builds: `cd frontend && npm run build:artifact` (online version) and `npm run build:demo` (standalone demo → `frontend/dist-demo/index.html`). The demo can be published by dragging that file onto [Netlify Drop](https://app.netlify.com/drop); the repository itself can stay private. All differences, and where they live in the code, are listed in [`docs/ARTIFACT_VARIANT.md`](docs/ARTIFACT_VARIANT.md).
 
 ## From paper to software
 
@@ -50,14 +59,26 @@ The online version is built with `cd frontend && npm run build:artifact`. All di
 
 KPIs and forecasts are computed deterministically in code so that every figure stays traceable. The LLM agents make the decisions and formulate the arguments. Without an LLM (`LLM_PROVIDER=demo`), transparent rules decide: a case is escalated when there is a critical combination or a financial indicator clearly above its threshold. Quality indicators alone never lead to an escalation.
 
-## Adding and finding suppliers
+## Plants, suppliers and who gets warned
 
-- **In the cockpit:** the **＋** button next to the search field adds a supplier.
+- **Plants** (button *Plants* at the top): name, address and any number of contacts (name, e-mail, role).
+- **Suppliers:** the **＋** button next to the search field adds one; the pencil in the detail view edits it.
   - Only the supplier number and name are required.
+  - The address places the supplier on the map; city and country are enough. Coordinates can also be set by hand.
+  - *Supplies our plants* links the supplier to one or more plants.
+- **Recipients of an escalation:** the responsible buyer plus every contact of all linked plants; an address that appears twice is warned once. Outlook sends one e-mail per person; Teams and the cockpit get one message naming everyone. The detail view lists the recipients in advance.
   - Key figures are optional: spend cube for the last three years, planned volume, current Coface PD and the value 12 months ago, complaint rate and on-time delivery.
   - The agents evaluate the supplier immediately after saving. If data sources are missing, the assessment says so.
-- **Search:** the search field filters by name and supplier number, as well as by city, commodity and buyer. Further filters: result (escalated / risk detected / no risk), commodity, country, escalations only, customer share ≥ 50 % and minimum PD.
-- **Via the API:** `POST /api/suppliers` (master data plus optional `figures`) or `POST /api/suppliers/import` (from a source system, see below).
+- **Search:** the search field filters by name, supplier number, address, commodity and buyer. Further filters: result (escalated / risk detected / no risk), commodity, country, plant, escalations only, customer share ≥ 50 % and minimum PD.
+- **Via the API:** `POST /api/suppliers` (master data, address, `plant_ids`, optional `figures`), `POST /api/plants`, or `POST /api/suppliers/import` (from a source system, see below).
+
+### Geocoding
+
+Addresses are located offline from a bundled list of cities (`data/gazetteer.json`, built from [GeoNames](https://www.geonames.org/), CC BY 4.0); if the city is unknown, the country is used. With `GEOCODER=nominatim` the server version locates street addresses via OpenStreetMap Nominatim (please respect its usage policy). Country shapes on the map: [Natural Earth](https://www.naturalearthdata.com/) via `world-atlas`.
+
+### Language
+
+The flags at the top right switch the interface and all generated texts (KPIs, arguments, recommendations, e-mails) between German and English. API calls take `?lang=de|en`; auto mode has its own language setting; `DEFAULT_LANG` sets the default.
 
 ## Interfaces (backend)
 
@@ -99,7 +120,7 @@ POST /api/suppliers/import  {"source": "sap", "number": "100200", "buyer_email":
 | Outlook via Microsoft Graph `sendMail` | `outlook` | App registration in Entra ID with the application permission `Mail.Send` (admin consent; restrict it to the sender mailbox with an application access policy) → `MS_TENANT_ID`, `MS_CLIENT_ID`, `MS_CLIENT_SECRET`, `OUTLOOK_SENDER` |
 | Microsoft Teams (Adaptive Card) | `teams` | In the channel: *Workflows → "Post to a channel when a webhook request is received"* → URL as `TEAMS_WEBHOOK_URL` |
 
-The e-mail goes to the buyer's address from the master data. Both the e-mail and the Teams card contain the summary, the recommendation, the measures and a direct link (`APP_BASE_URL/?supplier=…`). Every delivery attempt is logged with its status (`GET /api/notifications`).
+E-mails go to the buyer and to the contacts of all linked plants, one e-mail per person. Both the e-mail and the Teams card contain the summary, the recommendation, the measures and a direct link (`APP_BASE_URL/?supplier=…`). Every delivery attempt is logged with its status (`GET /api/notifications`).
 
 ### Auto mode
 
@@ -107,7 +128,7 @@ At a configurable interval, auto mode checks **every supplier number on record**
 
 1. refreshes master data and key figures from the respective source system,
 2. runs the complete agent pipeline,
-3. sends an e-mail and/or Teams message to the responsible buyer whenever a case is escalated.
+3. sends an e-mail and/or Teams message to the responsible buyer and the contacts of the linked plants whenever a case is escalated.
 
 It can be switched on in the cockpit ("Automode" toggle), through the API (`PUT /api/automode {"enabled": true, "interval_minutes": 1440, "channels": ["outlook","teams"]}`, or start a run immediately with `POST /api/automode/run`), or with `AUTOMODE_ENABLED=true` as the initial value.
 
@@ -139,7 +160,9 @@ npm run dev
 
 Tests: `cd backend && pytest`
 
-All settings are documented in [`.env.example`](.env.example). With `SEED_DEMO_DATA=false` the system starts without the fictitious demo suppliers.
+All settings are documented in [`.env.example`](.env.example). With `SEED_DEMO_DATA=false` the system starts without the fictitious demo suppliers and plants (all marked "(Demo)").
+
+Texts generated by the agents live in `backend/app/i18n.py`. After changing them, run `python scripts/gen-texts.py` so the browser engine uses the same texts; after changing `backend/app/seed.py`, run `python scripts/export-demo-seed.py`.
 
 ## Internal Module data format
 
@@ -166,7 +189,9 @@ All thresholds are defined in `THRESHOLDS` (`internal_module.py`). Apart from th
 |---|---|---|
 | GET | `/api/suppliers?q=` | Suppliers with their latest assessment, search by name or number |
 | POST | `/api/suppliers` | Add a supplier (and evaluate it immediately) |
-| PUT / DELETE | `/api/suppliers/{id}` | Update / delete a supplier |
+| PUT / DELETE | `/api/suppliers/{id}` | Update (and re-evaluate) / delete a supplier |
+| GET / POST | `/api/plants` | Plants with contacts and linked suppliers / add a plant |
+| PUT / DELETE | `/api/plants/{id}` | Update / delete a plant |
 | GET | `/api/suppliers/{id}` | Report and history |
 | POST | `/api/suppliers/{id}/analyze` | Run the pipeline (server-sent events) |
 | POST | `/api/cycle` | Evaluate all suppliers (server-sent events) |
