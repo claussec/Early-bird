@@ -1,10 +1,6 @@
 # Supplier Risk Radar
 
-**AI-based early-warning system for financially critical suppliers.** It turns the reference model from the following paper into working software:
-
-> Claussen, C.; Haas, F.; Schätter, F.: *Early Detection of Financially Critical Suppliers with Artificial Intelligence: A Design-Oriented Case Study in Automotive Purchasing.* Pforzheim University.
-
-An agent system evaluates every supplier on record. It combines internal indicators (customer share, revenue development, planned purchasing volumes, Coface probability of default, quality) with information from the web. As described in the paper, the *Internal Data* agent first decides **"Risk?"**. If a risk is present, the Decision Module builds a **traceable chain of argumentation** and decides **"Escalation?"**, together with an action-oriented recommendation. There is deliberately no numeric score. When a case is escalated, the responsible buyer is notified, in auto mode also via Outlook and Teams.
+An agent system evaluates every supplier on record. It combines internal indicators (customer share, revenue development, planned purchasing volumes, Coface probability of default, quality) with information from the web. Following the underlying reference model, the *Internal Data* agent first decides **"Risk?"**. If a risk is present, the Decision Module builds a **traceable chain of argumentation** and decides **"Escalation?"**, together with an action-oriented recommendation. There is deliberately no numeric score. When a case is escalated, the responsible buyer is notified, in auto mode also via Outlook and Teams.
 
 The 3D cockpit shows the buying organisation's plant in the centre and the suppliers as buildings around it, grouped by commodity. Users can search by name or supplier number, filter the supplier base and add new suppliers directly.
 
