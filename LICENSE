@@ -1,0 +1,21 @@
+Copyright (c) 2026 Clemens Claussen. All rights reserved.
+
+This repository is published for viewing and evaluation only.
+
+No permission is granted to use, copy, modify, merge, publish, distribute,
+sublicense, sell or run this software or any part of it, in source or compiled
+form, for any purpose, without the prior written permission of the copyright
+holder. Viewing the source code on GitHub, and forking it on GitHub as far as
+the GitHub Terms of Service require, does not grant any of these rights.
+
+Third-party components keep their own licenses (see the package manifests),
+including GeoNames data (CC BY 4.0) in data/gazetteer.json and Natural Earth
+data via world-atlas.
+
+For permission requests: clemens-k.claussen@gmx.de
+
+---
+
+Alle Rechte vorbehalten. Dieses Repository ist nur zur Ansicht veröffentlicht.
+Jede Nutzung, Vervielfältigung, Änderung oder Weitergabe des Codes, ganz oder in
+Teilen, ist ohne vorherige schriftliche Zustimmung des Urhebers nicht gestattet.

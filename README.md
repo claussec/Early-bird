@@ -206,3 +206,7 @@ All thresholds are defined in `THRESHOLDS` (`internal_module.py`). Apart from th
 - The accuracy shown in the paper comes from a single case. It demonstrates feasibility, not a generally valid detection rate.
 - The connections to SAP, other systems and Microsoft 365 still need to be tested in the respective corporate environment.
 - For SAP, the company-specific mapping of transactional data is still to be added.
+
+## License
+
+Copyright (c) 2026 Clemens Claussen. **All rights reserved.** The code is published for viewing only; using, copying, modifying or distributing it requires prior written permission. See [`LICENSE`](LICENSE).
