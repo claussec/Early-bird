@@ -34,7 +34,7 @@ Users can search, filter (also by plant), add and edit suppliers with their addr
 | Web signals | Live crawling | Research prompt → Claude chat with web search → paste the answer back | Same prompt workflow |
 | SAP/ERP, Outlook, Teams, auto mode | ✅ | – | – |
 
-Builds: `cd frontend && npm run build:artifact` (online version) and `npm run build:demo` (standalone demo → `frontend/dist-demo/index.html`). The demo can be published by dragging that file onto [Netlify Drop](https://app.netlify.com/drop); the repository itself can stay private. All differences, and where they live in the code, are listed in [`docs/ARTIFACT_VARIANT.md`](docs/ARTIFACT_VARIANT.md).
+Builds: `cd frontend && npm run build:artifact` (online version) and `npm run build:demo` (standalone demo → `frontend/dist-demo/index.html`). The demo is a single HTML file: open it in a browser by double-clicking, or put it on any static web host. All differences, and where they live in the code, are listed in [`docs/ARTIFACT_VARIANT.md`](docs/ARTIFACT_VARIANT.md).
 
 ## From paper to software
 
