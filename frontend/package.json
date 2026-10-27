@@ -9,7 +9,9 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "build:artifact": "tsc -b && vite build --mode artifact && node scripts/artifact-page.mjs",
-    "dev:artifact": "vite --mode artifact"
+    "dev:artifact": "vite --mode artifact",
+    "build:demo": "tsc -b && vite build --mode demo",
+    "dev:demo": "vite --mode demo"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.6",
@@ -19,7 +21,9 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "recharts": "^3.2.1",
-    "three": "^0.180.0"
+    "three": "^0.180.0",
+    "topojson-client": "^3.1.0",
+    "world-atlas": "^2.0.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.25.0",
@@ -27,6 +31,7 @@
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
     "@types/three": "^0.180.0",
+    "@types/topojson-client": "^3.1.5",
     "@vitejs/plugin-react": "^4.4.1",
     "eslint": "^9.25.0",
     "eslint-plugin-react-hooks": "^5.2.0",

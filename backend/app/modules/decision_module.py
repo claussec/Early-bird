@@ -17,7 +17,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from ..i18n import t
+from ..i18n import num, t
 from ..llm import LLM, LLMUnavailable
 
 # Financial signals are prioritized over quality signals (paper, "Interpretation of results").
@@ -66,7 +66,7 @@ def map_indicators(kpis: list[dict], external: list[dict], as_of: str, lang: str
                 "type": kind,
                 "strength": strength,
                 "priority": "financial" if k["group"] in FINANCIAL_GROUPS else "operational",
-                "value": f"{k['value']} {k['unit']}",
+                "value": f"{num(k['value'])} {k['unit']}",
                 "source": k["source"],
                 "evidence": t(lang, "ind.threshold", formula=k["formula"], threshold=k["threshold"]),
             }

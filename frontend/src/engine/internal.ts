@@ -3,6 +3,7 @@
  * for the artifact variant, which runs the agents in the browser. Keep both in sync.
  */
 import type { Kpi } from '../types'
+import { tx, type Lang } from './texts'
 
 export interface InternalData {
   as_of?: string
@@ -46,13 +47,13 @@ const FORECAST_HORIZON = 4
 const OTHER_BUSINESS_GROWTH_CAP = 0.05
 const SOURCES = ['Spend Cube', 'Demand Planning', 'Risk Management (Coface)', 'Quality Management']
 
-const round = (v: number, d: number) => Math.round(v * 10 ** d) / 10 ** d
+// Like Python round(): rounds the exact binary value (85.975 → 85.97), so both engines agree.
+const round = (v: number, d: number) => Number(v.toFixed(d))
 const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length
 const pstdev = (xs: number[]) => {
   const m = mean(xs)
   return Math.sqrt(mean(xs.map((x) => (x - m) ** 2)))
 }
-const de = (v: number, d = 2) => v.toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d })
 
 function highIsBad(value: number, key: string): Kpi['status'] {
   const t = THRESHOLDS[key]
@@ -102,7 +103,7 @@ export function revenueForecast(d: InternalData): InternalResult['forecast'] {
   return out
 }
 
-function spendKpis(d: InternalData, years: number[]): Kpi[] {
+function spendKpis(d: InternalData, years: number[], lang: Lang): Kpi[] {
   const rev = d.revenue!
   const pur = d.purchase!
   const [first, last] = [years[0], years[years.length - 1]]
@@ -110,13 +111,13 @@ function spendKpis(d: InternalData, years: number[]): Kpi[] {
   const kpis: Kpi[] = [
     {
       id: 'customer_share',
-      label: 'Customer-Share',
-      group: 'Abhängigkeit',
+      label: tx(lang, 'kpi.customer_share'),
+      group: 'dependency',
       value: round(share * 100, 1),
       unit: '%',
       status: highIsBad(share, 'customer_share'),
-      formula: `Einkaufsvolumen ${last} / Lieferantenumsatz ${last} = ${de(pur[last])} / ${de(rev[last])} Mio. €`,
-      threshold: 'Warnung ≥ 30 %, kritisch ≥ 50 %',
+      formula: tx(lang, 'kpi.customer_share.formula', { last, pur: pur[last], rev: rev[last] }),
+      threshold: tx(lang, 'kpi.customer_share.threshold'),
       source: 'Spend Cube',
     },
   ]
@@ -125,31 +126,31 @@ function spendKpis(d: InternalData, years: number[]): Kpi[] {
   const deltaPp = (share - pur[ref] / rev[ref]) * 100
   kpis.push({
     id: 'customer_share_delta',
-    label: `Veränderung Customer-Share seit ${ref}`,
-    group: 'Abhängigkeit',
+    label: tx(lang, 'kpi.customer_share_delta', { ref }),
+    group: 'dependency',
     value: round(deltaPp, 1),
     unit: 'pp',
     status: highIsBad(deltaPp, 'customer_share_delta_pp'),
-    formula: `Customer-Share ${last} − Customer-Share ${ref}`,
-    threshold: 'Warnung ≥ +5 pp, kritisch ≥ +10 pp',
+    formula: tx(lang, 'kpi.customer_share_delta.formula', { last, ref }),
+    threshold: tx(lang, 'kpi.customer_share_delta.threshold'),
     source: 'Spend Cube',
   })
   const c = cagr(rev[first], rev[last], last - first)
   kpis.push({
     id: 'revenue_cagr',
-    label: `Umsatz-CAGR ${first}–${last}`,
-    group: 'Umsatz',
+    label: tx(lang, 'kpi.revenue_cagr', { first, last }),
+    group: 'revenue',
     value: round(c * 100, 1),
     unit: '%',
     status: c >= 0 ? 'ok' : c > -0.05 ? 'warn' : 'critical',
-    formula: `(${de(rev[last])} / ${de(rev[first])})^(1/${last - first}) − 1`,
-    threshold: 'Warnung < 0 %, kritisch ≤ −5 % p.a.',
+    formula: `(${rev[last].toFixed(2)} / ${rev[first].toFixed(2)})^(1/${last - first}) − 1`,
+    threshold: tx(lang, 'kpi.revenue_cagr.threshold'),
     source: 'Spend Cube',
   })
   return kpis
 }
 
-function planKpis(d: InternalData, years: number[], forecast: InternalResult['forecast']): Kpi[] {
+function planKpis(d: InternalData, years: number[], forecast: InternalResult['forecast'], lang: Lang): Kpi[] {
   const snapshots = d.plan_snapshots ?? []
   if (!snapshots.length || !years.length) return []
   const last = years[years.length - 1]
@@ -160,13 +161,13 @@ function planKpis(d: InternalData, years: number[], forecast: InternalResult['fo
     const change = forecast[0].revenue / revLast - 1
     kpis.push({
       id: 'revenue_forecast',
-      label: `Umsatzprognose ${forecast[0].year}`,
-      group: 'Umsatz',
+      label: tx(lang, 'kpi.revenue_forecast', { year: forecast[0].year }),
+      group: 'revenue',
       value: round(change * 100, 2),
       unit: '%',
       status: lowIsBad(change, 'revenue_forecast_change'),
-      formula: `Planvolumen ${forecast[0].year} + fortgeschriebenes Fremdgeschäft = ${de(forecast[0].revenue)} Mio. € vs. ${de(revLast)} Mio. €`,
-      threshold: 'Warnung ≤ −5 %, kritisch ≤ −10 %',
+      formula: tx(lang, 'kpi.revenue_forecast.formula', { year: forecast[0].year, fc: forecast[0].revenue, rev: revLast }),
+      threshold: tx(lang, 'kpi.revenue_forecast.threshold'),
       source: 'Spend Cube + Demand Planning',
     })
   }
@@ -176,13 +177,13 @@ function planKpis(d: InternalData, years: number[], forecast: InternalResult['fo
     const change = planNext / purLast - 1
     kpis.push({
       id: 'plan_change',
-      label: `Geplantes Einkaufsvolumen ${nextYear}`,
-      group: 'Planung',
+      label: tx(lang, 'kpi.plan_change', { year: nextYear }),
+      group: 'planning',
       value: round(change * 100, 1),
       unit: '%',
       status: lowIsBad(change, 'plan_change_next'),
-      formula: `Plan ${nextYear} / Ist ${last} − 1 = ${de(planNext)} / ${de(purLast)}`,
-      threshold: 'Warnung ≤ −8 %, kritisch ≤ −15 %',
+      formula: tx(lang, 'kpi.plan_change.formula', { year: nextYear, last, plan: planNext, pur: purLast }),
+      threshold: tx(lang, 'kpi.plan_change.threshold'),
       source: 'Demand Planning',
     })
   }
@@ -191,32 +192,32 @@ function planKpis(d: InternalData, years: number[], forecast: InternalResult['fo
     const vol = pstdev(revisions) / mean(revisions)
     kpis.push({
       id: 'plan_volatility',
-      label: `Volatilität Planvolumen ${nextYear}`,
-      group: 'Planung',
+      label: tx(lang, 'kpi.plan_volatility', { year: nextYear }),
+      group: 'planning',
       value: round(vol * 100, 1),
       unit: '%',
       status: highIsBad(vol, 'plan_volatility'),
-      formula: `Variationskoeffizient über ${revisions.length} Planstände`,
-      threshold: 'Warnung ≥ 8 %, kritisch ≥ 15 %',
+      formula: tx(lang, 'kpi.plan_volatility.formula', { n: revisions.length }),
+      threshold: tx(lang, 'kpi.plan_volatility.threshold'),
       source: 'Demand Planning',
     })
   }
   return kpis
 }
 
-function ratingKpis(pdHist: { date: string; pd: number }[], asOf: string): Kpi[] {
+function ratingKpis(pdHist: { date: string; pd: number }[], asOf: string, lang: Lang): Kpi[] {
   if (!pdHist.length) return []
   const latest = pdHist[pdHist.length - 1]
   const kpis: Kpi[] = [
     {
       id: 'pd_latest',
-      label: 'Coface-Ausfallwahrscheinlichkeit (PD)',
-      group: 'Rating',
+      label: tx(lang, 'kpi.pd_latest'),
+      group: 'rating',
       value: latest.pd,
       unit: '%',
       status: highIsBad(latest.pd, 'pd_latest'),
-      formula: `Letzter Ratingstand vom ${latest.date}`,
-      threshold: 'Gelb ≥ 1 %, rot ≥ 3 %',
+      formula: tx(lang, 'kpi.pd_latest.formula', { date: latest.date }),
+      threshold: tx(lang, 'kpi.pd_latest.threshold'),
       source: 'Risk Management (Coface)',
     },
   ]
@@ -226,31 +227,31 @@ function ratingKpis(pdHist: { date: string; pd: number }[], asOf: string): Kpi[]
   const change = latest.pd - base.pd
   kpis.push({
     id: 'pd_trend',
-    label: `PD-Trend seit ${base.date.slice(0, 7)}`,
-    group: 'Rating',
+    label: tx(lang, 'kpi.pd_trend', { date: base.date.slice(0, 7) }),
+    group: 'rating',
     value: round(change, 2),
     unit: 'pp',
     status: highIsBad(change, 'pd_change_pp'),
     formula: `${latest.pd} % − ${base.pd} %`,
-    threshold: 'Warnung ≥ +0,5 pp, kritisch ≥ +1 pp',
+    threshold: tx(lang, 'kpi.pd_trend.threshold'),
     source: 'Risk Management (Coface)',
   })
   const gap = Math.max(...pdHist.slice(1).map((p, i) => monthsBetween(pdHist[i].date, p.date)))
   kpis.push({
     id: 'rating_gap',
-    label: 'Längste Lücke zwischen Ratingständen',
-    group: 'Rating',
+    label: tx(lang, 'kpi.rating_gap'),
+    group: 'rating',
     value: gap,
-    unit: 'Monate',
+    unit: tx(lang, 'unit.months'),
     status: highIsBad(gap, 'rating_staleness_months'),
-    formula: `${window.length} Ratingstände in 48 Monaten`,
-    threshold: 'Warnung ≥ 12 Monate, kritisch ≥ 24 Monate',
+    formula: tx(lang, 'kpi.rating_gap.formula', { n: window.length }),
+    threshold: tx(lang, 'kpi.rating_gap.threshold'),
     source: 'Risk Management (Coface)',
   })
   return kpis
 }
 
-function qualityKpis(quality: NonNullable<InternalData['quality']>): Kpi[] {
+function qualityKpis(quality: NonNullable<InternalData['quality']>, lang: Lang): Kpi[] {
   const years = Object.keys(quality)
     .map(Number)
     .sort((a, b) => a - b)
@@ -265,33 +266,33 @@ function qualityKpis(quality: NonNullable<InternalData['quality']>): Kpi[] {
     const change = prev.length && mean(prev) > 0 ? latest.ppm / mean(prev) - 1 : 0
     kpis.push({
       id: 'ppm',
-      label: 'Reklamationsquote (ppm)',
-      group: 'Qualität',
+      label: tx(lang, 'kpi.ppm'),
+      group: 'quality',
       value: latest.ppm,
       unit: 'ppm',
       status: highIsBad(change, 'ppm_change'),
-      formula: prev.length ? `Veränderung ggü. Ø Vorjahre: ${change >= 0 ? '+' : ''}${Math.round(change * 100)} %` : 'Keine Vorjahreswerte',
-      threshold: 'Warnung ≥ +25 %, kritisch ≥ +60 % ggü. Vorjahren',
+      formula: prev.length ? tx(lang, 'kpi.ppm.formula', { change: change * 100 }) : tx(lang, 'kpi.ppm.no_history'),
+      threshold: tx(lang, 'kpi.ppm.threshold'),
       source: 'Quality Management',
     })
   }
   if (latest.otd !== null && latest.otd !== undefined) {
     kpis.push({
       id: 'otd',
-      label: 'Liefertreue',
-      group: 'Qualität',
+      label: tx(lang, 'kpi.otd'),
+      group: 'quality',
       value: round(latest.otd * 100, 1),
       unit: '%',
       status: lowIsBad(latest.otd, 'otd_latest'),
-      formula: `Pünktliche Lieferungen ${years[years.length - 1]}`,
-      threshold: 'Warnung ≤ 95 %, kritisch ≤ 90 %',
+      formula: tx(lang, 'kpi.otd.formula', { year: years[years.length - 1] }),
+      threshold: tx(lang, 'kpi.otd.threshold'),
       source: 'Quality Management',
     })
   }
   return kpis
 }
 
-export function computeKpis(d: InternalData): InternalResult {
+export function computeKpis(d: InternalData, lang: Lang = 'de'): InternalResult {
   const years = spendYears(d)
   const pdHist = [...(d.pd_history ?? [])].sort((a, b) => a.date.localeCompare(b.date))
   let asOf = d.as_of ?? ''
@@ -301,10 +302,10 @@ export function computeKpis(d: InternalData): InternalResult {
   }
   const forecast = revenueForecast(d)
   const kpis = [
-    ...(years.length ? spendKpis(d, years) : []),
-    ...planKpis(d, years, forecast),
-    ...ratingKpis(pdHist, asOf),
-    ...qualityKpis(d.quality ?? {}),
+    ...(years.length ? spendKpis(d, years, lang) : []),
+    ...planKpis(d, years, forecast, lang),
+    ...ratingKpis(pdHist, asOf, lang),
+    ...qualityKpis(d.quality ?? {}, lang),
   ]
   const available = new Set(kpis.flatMap((k) => k.source.split(' + ')))
   const snapshots = d.plan_snapshots ?? []

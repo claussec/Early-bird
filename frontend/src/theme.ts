@@ -1,20 +1,21 @@
 import type { Light, RiskStatus } from './types'
 
-// Status palette (fixed, never reused for data series). Always paired with icon + label.
-export const STATUS: Record<Light, { color: string; label: string }> = {
-  green: { color: '#0ca30c', label: 'Grün' },
-  yellow: { color: '#fab219', label: 'Gelb' },
-  red: { color: '#d03b3b', label: 'Rot' },
+// Status palette (fixed, never reused for data series). Always paired with icon + label
+// (labels: i18n keys `light.*`).
+export const STATUS: Record<Light, { color: string }> = {
+  green: { color: '#0ca30c' },
+  yellow: { color: '#fab219' },
+  red: { color: '#d03b3b' },
 }
 
 /**
  * The two decisions of the paper (Risk?, Escalation?) as one state. Shown with the status
- * colors, always together with icon + label. Not a score.
+ * colors, always together with icon + label (i18n keys `risk.*`). Not a score.
  */
-export const RISK: Record<RiskStatus, { light: Light; label: string; hint: string }> = {
-  none: { light: 'green', label: 'Kein Risiko', hint: 'Risk? = nein – Neubewertung im nächsten Quartal' },
-  risk: { light: 'yellow', label: 'Risiko erkannt', hint: 'Risk? = ja, Escalation? = nein' },
-  escalated: { light: 'red', label: 'Eskaliert', hint: 'Escalation? = ja – Einkäufer benachrichtigt' },
+export const RISK: Record<RiskStatus, { light: Light }> = {
+  none: { light: 'green' },
+  risk: { light: 'yellow' },
+  escalated: { light: 'red' },
 }
 export const RISK_ORDER: RiskStatus[] = ['escalated', 'risk', 'none']
 
@@ -34,8 +35,18 @@ export const SERIES = {
 
 export const KPI_STATUS: Record<string, Light> = { ok: 'green', warn: 'yellow', critical: 'red' }
 
+let locale = 'de-DE'
+/** Set by the language switch; numbers and dates follow the UI language. */
+export const setLocale = (l: string) => {
+  locale = l
+}
+export const getLocale = () => locale
+
 export const fmt = (v: number | undefined | null, digits = 1) =>
-  v === undefined || v === null ? '–' : v.toLocaleString('de-DE', { minimumFractionDigits: digits, maximumFractionDigits: digits })
+  v === undefined || v === null ? '–' : v.toLocaleString(locale, { minimumFractionDigits: digits, maximumFractionDigits: digits })
+
+export const fmtDate = (iso: string | null | undefined, withTime = true) =>
+  iso ? new Date(iso).toLocaleString(locale, withTime ? { dateStyle: 'short', timeStyle: 'short' } : { dateStyle: 'short' }) : '–'
 
 /** Value with unit, or a dash when the value is missing. */
 export const fmtUnit = (v: number | undefined | null, unit: string, digits = 1) =>

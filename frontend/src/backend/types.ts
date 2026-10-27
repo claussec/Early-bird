@@ -4,8 +4,11 @@ import type {
   Automode,
   Channel,
   ExternalDoc,
+  Lang,
   Meta,
   Notification,
+  Plant,
+  PlantInput,
   StreamEvent,
   Supplier,
   SupplierDetail,
@@ -14,18 +17,27 @@ import type {
 } from '../types'
 
 /**
- * Everything the UI needs from a backend. `server` talks to the FastAPI app,
- * `artifact` runs the agents in the browser on claude.ai. Optional groups exist
- * only in one of the two; the UI shows a feature only when its group is present.
+ * Everything the UI needs from a backend. `server` talks to the FastAPI app, `artifact`
+ * runs the agents in the browser on claude.ai, `demo` is the standalone page (in memory,
+ * rule-based). Optional groups exist only in some of them; the UI shows a feature only when
+ * its group is present.
  */
 export interface Backend {
   target: Target
+  /** Language of the texts the agents generate from now on. */
+  setLang(lang: Lang): void
   meta(): Promise<Meta>
   suppliers(): Promise<Supplier[]>
   supplier(id: string): Promise<SupplierDetail>
   notifications(): Promise<Notification[]>
   createSupplier(input: SupplierInput): Promise<Supplier>
+  /** Updates master data and plant links (and figures, if given) and re-evaluates. */
+  updateSupplier(id: string, input: SupplierInput): Promise<Supplier>
   deleteSupplier(id: string): Promise<void>
+  plants(): Promise<Plant[]>
+  createPlant(input: PlantInput): Promise<Plant>
+  updatePlant(id: string, input: PlantInput): Promise<Plant>
+  deletePlant(id: string): Promise<void>
   /** Runs the agent pipeline for one supplier and reports each step. */
   analyze(id: string, onEvent: (e: StreamEvent) => void): Promise<void>
   /** Evaluates every supplier. */
@@ -37,11 +49,11 @@ export interface Backend {
   automode?: {
     channels(): Promise<Channel[]>
     get(): Promise<Automode>
-    set(changes: Partial<Pick<Automode, 'enabled' | 'interval_minutes' | 'channels'>>): Promise<Automode>
+    set(changes: Partial<Pick<Automode, 'enabled' | 'interval_minutes' | 'channels' | 'lang'>>): Promise<Automode>
     run(): Promise<{ started: boolean }>
   }
 
-  /** Artifact only: web research through a Claude chat (prompt out, answer back in). */
+  /** Artifact and demo: web research through a Claude chat (prompt out, answer back in). */
   webResearch?: {
     /** Stores the supplier's web signals and re-evaluates it (`agents`: current agent mode, `rules`: no Claude calls). */
     save(supplierId: string, signals: ExternalDoc[], reevaluate: 'agents' | 'rules'): Promise<void>
@@ -57,7 +69,7 @@ export interface Backend {
     available(): boolean
   }
 
-  /** Artifact only: storage state and demo data. */
+  /** Artifact and demo: storage state and demo data. */
   storage?: {
     persistent(): boolean
     hasDemoData(): boolean

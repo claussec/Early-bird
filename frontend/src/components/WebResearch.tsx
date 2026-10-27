@@ -1,5 +1,5 @@
 /**
- * Artifact only: web research through a regular Claude chat.
+ * Artifact and demo: web research through a regular Claude chat.
  * 1. Copy the generated research prompt, 2. run it in Claude with web search,
  * 3. paste the answer back; the signals are previewed, stored and the supplier re-evaluated.
  */
@@ -7,7 +7,9 @@ import { Check, ClipboardCopy, ExternalLink, Loader2, Sparkles, Trash2, X } from
 import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { backend, type Backend } from '../backend'
 import { batchResearchPrompt, extractJson, normalizeSignals, researchPrompt, signalKey, type ParsedSignals } from '../engine/external'
-import type { ExternalDoc, Supplier } from '../types'
+import { useI18n, Rich, type T } from '../i18n'
+import type { ExternalDoc, Lang, Supplier } from '../types'
+import { categoryLabel } from './DetailPanel'
 import { StatusBadge } from './ui'
 
 type Web = NonNullable<Backend['webResearch']>
@@ -21,23 +23,23 @@ interface Candidate {
 
 const MAX_BATCH = 15
 
-async function parseAnswer(text: string, scope: Supplier[], web: Web): Promise<ParsedSignals[]> {
+async function parseAnswer(text: string, scope: Supplier[], web: Web, t: T, lang: Lang): Promise<ParsedSignals[]> {
   const value = extractJson(text)
-  const groups = value === undefined ? [] : normalizeSignals(value)
+  const groups = value === undefined ? [] : normalizeSignals(value, lang)
   if (groups.length) return groups
   if (web.canStructure()) return web.structure(text, scope)
-  throw new Error('In der Antwort wurde kein JSON-Block gefunden. Bitte die komplette Antwort von Claude einfügen.')
+  throw new Error(t('web.no_json'))
 }
 
 /** Assigns parsed signals to suppliers; with one supplier in scope everything belongs to it. */
-function toCandidates(groups: ParsedSignals[], scope: Supplier[], existing: (id: string) => ExternalDoc[]) {
+function toCandidates(groups: ParsedSignals[], scope: Supplier[], existing: (id: string) => ExternalDoc[], noNumber: string) {
   const byNumber = new Map(scope.map((s) => [s.number.toLowerCase(), s]))
   const unmatched: string[] = []
   const out: Candidate[] = []
   for (const g of groups) {
     const s = (g.supplier_number && byNumber.get(g.supplier_number.toLowerCase())) || (scope.length === 1 ? scope[0] : undefined)
     if (!s) {
-      if (g.signals.length) unmatched.push(g.supplier_number ?? 'ohne Nummer')
+      if (g.signals.length) unmatched.push(g.supplier_number ?? noNumber)
       continue
     }
     const known = new Set(existing(s.id).map(signalKey))
@@ -50,26 +52,28 @@ function toCandidates(groups: ParsedSignals[], scope: Supplier[], existing: (id:
 }
 
 function SignalBadge({ doc }: { doc: ExternalDoc }) {
+  const { t } = useI18n()
   if (doc.signal === 'risk')
     return (
       <StatusBadge light={doc.severity === 3 ? 'red' : 'yellow'} size="sm">
-        Risiko · Schwere {doc.severity}
+        {t('detail.severity', { n: doc.severity })}
       </StatusBadge>
     )
   if (doc.signal === 'success')
     return (
       <StatusBadge light="green" size="sm">
-        Erfolg
+        {t('detail.success')}
       </StatusBadge>
     )
-  return <span className="text-[11px] text-ink-3">neutral</span>
+  return <span className="text-[11px] text-ink-3">{t('detail.type.neutral')}</span>
 }
 
 function SignalCard({ doc, action }: { doc: ExternalDoc; action?: ReactNode }) {
+  const { t } = useI18n()
   return (
     <div className="rounded-xl border border-line bg-surface-0/50 p-3">
       <div className="flex items-center gap-2 text-[11px] text-ink-3">
-        <span>{doc.date || 'ohne Datum'}</span>·<span>{doc.category}</span>
+        <span>{doc.date || t('web.no_date')}</span>·<span>{categoryLabel(t, doc.category)}</span>
         <span className="ml-auto flex items-center gap-1.5">
           <SignalBadge doc={doc} />
           {action}
@@ -92,6 +96,7 @@ function SignalCard({ doc, action }: { doc: ExternalDoc; action?: ReactNode }) {
 
 /** Step 1: the prompt, copied with one click (falls back to a selectable text field). */
 function PromptStep({ prompt, label }: { prompt: string; label: string }) {
+  const { t } = useI18n()
   const [copied, setCopied] = useState(false)
   const [show, setShow] = useState(false)
   const area = useRef<HTMLTextAreaElement>(null)
@@ -113,10 +118,10 @@ function PromptStep({ prompt, label }: { prompt: string; label: string }) {
           className="flex items-center gap-2 rounded-xl bg-accent px-3 py-2 text-xs font-semibold text-white hover:brightness-110"
         >
           {copied ? <Check size={14} /> : <ClipboardCopy size={14} />}
-          {copied ? 'Kopiert' : label}
+          {copied ? t('web.copied') : label}
         </button>
         <button onClick={() => setShow(!show)} className="text-xs text-ink-3 hover:text-ink-1">
-          {show ? 'Prompt ausblenden' : 'Prompt anzeigen'}
+          {show ? t('web.hide_prompt') : t('web.show_prompt')}
         </button>
       </div>
       {show && (
@@ -128,8 +133,7 @@ function PromptStep({ prompt, label }: { prompt: string; label: string }) {
         />
       )}
       <p className="mt-2 text-xs text-ink-3">
-        In einem neuen Claude-Chat einfügen, <b className="text-ink-2">Websuche</b> aktivieren und absenden. Die komplette Antwort kopierst
-        du dann unten hinein.
+        <Rich text={t('web.instructions')} />
       </p>
     </div>
   )
@@ -150,6 +154,7 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
 }
 
 function useImport(web: Web, scope: Supplier[], existing: (id: string) => ExternalDoc[]) {
+  const { t, lang } = useI18n()
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -160,7 +165,7 @@ function useImport(web: Web, scope: Supplier[], existing: (id: string) => Extern
     setError(null)
     try {
       const known = loadExisting ? await loadExisting() : existing
-      const r = toCandidates(await parseAnswer(text, scope, web), scope, known)
+      const r = toCandidates(await parseAnswer(text, scope, web, t, lang), scope, known, t('web.no_number'))
       setCandidates(r.candidates)
       setUnmatched(r.unmatched)
     } catch (e) {
@@ -179,6 +184,7 @@ function useImport(web: Web, scope: Supplier[], existing: (id: string) => Extern
 }
 
 function PasteStep({ imp, placeholder }: { imp: ReturnType<typeof useImport>; placeholder: string }) {
+  const { t } = useI18n()
   return (
     <>
       <textarea
@@ -194,15 +200,16 @@ function PasteStep({ imp, placeholder }: { imp: ReturnType<typeof useImport>; pl
         className="mt-2 flex items-center gap-2 rounded-xl border border-accent/50 px-3 py-2 text-xs font-semibold text-ink-1 hover:bg-accent/10 disabled:opacity-50"
       >
         {imp.busy ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} className="text-accent" />}
-        Antwort auswerten
+        {t('web.evaluate')}
       </button>
     </>
   )
 }
 
 function Preview({ imp, names }: { imp: ReturnType<typeof useImport>; names?: Record<string, string> }) {
+  const { t } = useI18n()
   if (!imp.candidates) return null
-  if (!imp.candidates.length) return <p className="text-xs text-ink-3">Claude hat keine Meldungen gefunden. Es wird nichts geändert.</p>
+  if (!imp.candidates.length) return <p className="text-xs text-ink-3">{t('web.nothing_found')}</p>
   return (
     <div className="space-y-2">
       {imp.candidates.map((c, i) => (
@@ -211,12 +218,12 @@ function Preview({ imp, names }: { imp: ReturnType<typeof useImport>; names?: Re
           <div className="min-w-0 flex-1">
             {names && <div className="mb-1 text-[11px] font-medium text-ink-2">{names[c.supplierId]}</div>}
             <SignalCard doc={c.doc} />
-            {c.duplicate && <div className="mt-1 text-[11px] text-ink-3">Bereits vorhanden</div>}
+            {c.duplicate && <div className="mt-1 text-[11px] text-ink-3">{t('web.duplicate')}</div>}
           </div>
         </label>
       ))}
       {imp.unmatched.length > 0 && (
-        <p className="text-xs text-ink-3">Nicht zugeordnet (Lieferantennummer unbekannt): {imp.unmatched.join(', ')}</p>
+        <p className="text-xs text-ink-3">{t('web.unmatched', { list: imp.unmatched.join(', ') })}</p>
       )}
     </div>
   )
@@ -234,8 +241,9 @@ export function WebResearchPanel({
   signals: ExternalDoc[]
   onChanged: () => void
 }) {
+  const { t, lang } = useI18n()
   const imp = useImport(web, [supplier], () => signals)
-  const prompt = useMemo(() => researchPrompt(supplier), [supplier])
+  const prompt = useMemo(() => researchPrompt(supplier, lang), [supplier, lang])
   const selected = imp.candidates?.filter((c) => c.selected) ?? []
 
   const apply = async () => {
@@ -268,15 +276,15 @@ export function WebResearchPanel({
   return (
     <div className="mt-4 space-y-5">
       <section className="space-y-4 rounded-xl border border-accent/30 bg-accent/5 p-4">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-accent">Web-Recherche mit Claude</div>
-        <Step n={1} title="Recherche-Prompt kopieren">
-          <PromptStep prompt={prompt} label="Recherche-Prompt kopieren" />
+        <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-accent">{t('web.title')}</div>
+        <Step n={1} title={t('web.step_copy')}>
+          <PromptStep prompt={prompt} label={t('web.step_copy')} />
         </Step>
-        <Step n={2} title="Antwort von Claude einfügen">
-          <PasteStep imp={imp} placeholder="Komplette Antwort von Claude hier einfügen …" />
+        <Step n={2} title={t('web.step_paste')}>
+          <PasteStep imp={imp} placeholder={t('web.paste_ph')} />
         </Step>
         {imp.candidates && (
-          <Step n={3} title="Meldungen prüfen & übernehmen">
+          <Step n={3} title={t('web.step_review')}>
             <Preview imp={imp} />
             {selected.length > 0 && (
               <button
@@ -285,7 +293,7 @@ export function WebResearchPanel({
                 className="mt-3 flex items-center gap-2 rounded-xl bg-accent px-3 py-2 text-xs font-semibold text-white hover:brightness-110 disabled:opacity-60"
               >
                 {imp.busy ? <Loader2 size={14} className="spin" /> : <Check size={14} />}
-                {selected.length} Meldung(en) übernehmen & neu bewerten
+                {t('web.apply', { n: selected.length })}
               </button>
             )}
           </Step>
@@ -295,7 +303,7 @@ export function WebResearchPanel({
 
       <section>
         <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-3">
-          Gespeicherte Web-Signale ({signals.length})
+          {t('web.stored', { n: signals.length })}
         </h3>
         <div className="space-y-2">
           {signals.map((d, i) => (
@@ -306,15 +314,15 @@ export function WebResearchPanel({
                 <button
                   onClick={() => remove(i)}
                   className="rounded p-0.5 text-ink-3 hover:text-[#ff8a8a]"
-                  aria-label="Signal entfernen"
-                  title="Signal entfernen"
+                  aria-label={t('web.remove')}
+                  title={t('web.remove')}
                 >
                   <Trash2 size={13} />
                 </button>
               }
             />
           ))}
-          {!signals.length && <p className="text-xs text-ink-3">Noch keine Web-Signale. Starte oben mit dem Recherche-Prompt.</p>}
+          {!signals.length && <p className="text-xs text-ink-3">{t('web.none_yet')}</p>}
         </div>
       </section>
     </div>
@@ -333,11 +341,12 @@ export function BatchResearch({
   onDone: () => void
   onClose: () => void
 }) {
+  const { t, lang } = useI18n()
   const [chosen, setChosen] = useState<Set<string>>(() => new Set(suppliers.slice(0, MAX_BATCH).map((s) => s.id)))
   const scope = suppliers.filter((s) => chosen.has(s.id))
   const [existing, setExisting] = useState<Record<string, ExternalDoc[]>>({})
   const imp = useImport(web, scope, (id) => existing[id] ?? [])
-  const prompt = useMemo(() => batchResearchPrompt(scope), [scope])
+  const prompt = useMemo(() => batchResearchPrompt(scope, lang), [scope, lang])
   const names = Object.fromEntries(suppliers.map((s) => [s.id, `${s.name} (${s.number})`]))
   const selected = imp.candidates?.filter((c) => c.selected) ?? []
   const [progress, setProgress] = useState<string | null>(null)
@@ -384,15 +393,15 @@ export function BatchResearch({
       <div className="glass my-auto w-full max-w-2xl rounded-2xl">
         <header className="flex items-center justify-between border-b border-line px-5 py-4">
           <div>
-            <h2 className="text-base font-semibold text-ink-1">Sammel-Recherche</h2>
-            <p className="text-xs text-ink-3">Web-Signale für mehrere Lieferanten mit einem Claude-Chat holen (bis zu {MAX_BATCH}).</p>
+            <h2 className="text-base font-semibold text-ink-1">{t('web.batch_title')}</h2>
+            <p className="text-xs text-ink-3">{t('web.batch_subtitle', { n: MAX_BATCH })}</p>
           </div>
-          <button onClick={onClose} className="rounded-lg p-1.5 text-ink-3 hover:bg-white/5 hover:text-ink-1" aria-label="Schließen">
+          <button onClick={onClose} className="rounded-lg p-1.5 text-ink-3 hover:bg-white/5 hover:text-ink-1" aria-label={t('common.close')}>
             <X size={18} />
           </button>
         </header>
         <div className="space-y-5 px-5 py-4">
-          <Step n={1} title={`Lieferanten wählen (${scope.length} ausgewählt)`}>
+          <Step n={1} title={t('web.choose', { n: scope.length })}>
             <div className="scroll-thin max-h-40 space-y-0.5 overflow-y-auto rounded-xl border border-line p-2">
               {suppliers.map((s) => (
                 <label
@@ -405,31 +414,29 @@ export function BatchResearch({
                 </label>
               ))}
             </div>
-            <p className="mt-1 text-[11px] text-ink-3">
-              Vorausgewählt sind die Lieferanten, die gerade durch Suche und Filter sichtbar sind.
-            </p>
+            <p className="mt-1 text-[11px] text-ink-3">{t('web.preselected')}</p>
           </Step>
-          <Step n={2} title="Sammel-Prompt kopieren">
+          <Step n={2} title={t('web.batch_copy')}>
             {scope.length ? (
-              <PromptStep prompt={prompt} label="Sammel-Prompt kopieren" />
+              <PromptStep prompt={prompt} label={t('web.batch_copy')} />
             ) : (
-              <p className="text-xs text-ink-3">Bitte mindestens einen Lieferanten wählen.</p>
+              <p className="text-xs text-ink-3">{t('web.choose_one')}</p>
             )}
           </Step>
-          <Step n={3} title="Antwort von Claude einfügen">
-            <PasteStep imp={{ ...imp, analyse }} placeholder="Komplette Antwort von Claude hier einfügen …" />
+          <Step n={3} title={t('web.step_paste')}>
+            <PasteStep imp={{ ...imp, analyse }} placeholder={t('web.paste_ph')} />
           </Step>
           {imp.candidates && (
-            <Step n={4} title="Meldungen prüfen & übernehmen">
+            <Step n={4} title={t('web.step_review')}>
               <Preview imp={imp} names={names} />
             </Step>
           )}
           {imp.error && <p className="text-xs text-[#ff8a8a]">{imp.error}</p>}
         </div>
         <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-line px-5 py-4">
-          {progress && <span className="mr-auto text-xs text-ink-3">Speichere {progress}</span>}
+          {progress && <span className="mr-auto text-xs text-ink-3">{t('web.saving', { progress })}</span>}
           <button onClick={onClose} className="rounded-xl px-4 py-2 text-sm text-ink-2 hover:bg-white/5">
-            Schließen
+            {t('common.close')}
           </button>
           <button
             onClick={apply}
@@ -437,13 +444,10 @@ export function BatchResearch({
             className="flex items-center gap-2 rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
           >
             {imp.busy ? <Loader2 size={16} className="spin" /> : <Check size={16} />}
-            {selected.length} Meldung(en) übernehmen
+            {t('web.batch_apply', { n: selected.length })}
           </button>
         </footer>
-        <p className="px-5 pb-4 text-[11px] text-ink-3">
-          Nach dem Übernehmen werden die betroffenen Lieferanten regelbasiert neu bewertet. Eine Claude-Analyse startest du je Lieferant mit
-          „Analyse jetzt ausführen“.
-        </p>
+        <p className="px-5 pb-4 text-[11px] text-ink-3">{t('web.batch_note')}</p>
       </div>
     </div>
   )

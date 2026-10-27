@@ -14,6 +14,7 @@ import httpx
 from pydantic import BaseModel
 
 from .config import settings
+from .i18n import t
 
 log = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
@@ -30,11 +31,14 @@ class LLM:
 
     @property
     def label(self) -> str:
+        return self.label_for(settings.default_lang)
+
+    def label_for(self, lang: str) -> str:
         if self.provider == "anthropic":
             return f"Claude ({settings.anthropic_model})"
         if self.provider == "ollama":
             return f"Ollama ({settings.ollama_model}, offline)"
-        return "Demo (regelbasiert, ohne LLM)"
+        return t(lang, "llm.rules")
 
     def structured(self, system: str, prompt: str, schema: type[T]) -> T:
         if self.provider == "anthropic":

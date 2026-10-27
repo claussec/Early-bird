@@ -1,5 +1,5 @@
 /** Server variant: the FastAPI backend (see backend/app/main.py). */
-import type { Automode, Channel, Meta, Notification, StreamEvent, Supplier, SupplierDetail, SupplierInput } from '../types'
+import type { Automode, Channel, Lang, Meta, Notification, Plant, StreamEvent, Supplier, SupplierDetail, SupplierInput } from '../types'
 import type { Backend } from './types'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -42,16 +42,27 @@ async function stream(path: string, onEvent: (e: StreamEvent) => void): Promise<
   }
 }
 
+let lang: Lang = 'de'
+const withLang = (path: string) => `${path}${path.includes('?') ? '&' : '?'}lang=${lang}`
+
 export const httpBackend: Backend = {
   target: 'server',
+  setLang(l) {
+    lang = l
+  },
   meta: () => get<Meta>('/api/meta'),
   suppliers: () => get<Supplier[]>('/api/suppliers'),
   supplier: (id) => get<SupplierDetail>(`/api/suppliers/${id}`),
   notifications: () => get<Notification[]>('/api/notifications'),
-  createSupplier: (input: SupplierInput) => send<Supplier>('POST', '/api/suppliers', input),
+  createSupplier: (input: SupplierInput) => send<Supplier>('POST', withLang('/api/suppliers'), input),
+  updateSupplier: (id, input) => send<Supplier>('PUT', withLang(`/api/suppliers/${id}`), input),
   deleteSupplier: (id) => send<void>('DELETE', `/api/suppliers/${id}`),
-  analyze: (id, onEvent) => stream(`/api/suppliers/${id}/analyze`, onEvent),
-  cycle: (onEvent) => stream('/api/cycle', onEvent),
+  plants: () => get<Plant[]>('/api/plants'),
+  createPlant: (input) => send<Plant>('POST', '/api/plants', input),
+  updatePlant: (id, input) => send<Plant>('PUT', `/api/plants/${id}`, input),
+  deletePlant: (id) => send<void>('DELETE', `/api/plants/${id}`),
+  analyze: (id, onEvent) => stream(withLang(`/api/suppliers/${id}/analyze`), onEvent),
+  cycle: (onEvent) => stream(withLang('/api/cycle'), onEvent),
   automode: {
     channels: () => get<Channel[]>('/api/channels'),
     get: () => get<Automode>('/api/automode'),

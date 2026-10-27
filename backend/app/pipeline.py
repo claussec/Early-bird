@@ -66,7 +66,7 @@ def run(
     if master is None:
         yield {"type": "error", "message": f"Unknown supplier {supplier_id}"}
         return
-    yield {"type": "start", "supplier_id": supplier_id, "llm": llm.label, "steps": STEPS}
+    yield {"type": "start", "supplier_id": supplier_id, "llm": llm.label_for(lang), "steps": STEPS}
     yes_no = lambda v: t(lang, "yes" if v else "no")  # noqa: E731
 
     yield _event("internal", "running")
@@ -172,7 +172,7 @@ def _report(
     return {
         "supplier_id": supplier_id,
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "llm": llm.label,
+        "llm": llm.label_for(lang),
         "lang": lang,
         "as_of": internal["as_of"],
         "status": status,

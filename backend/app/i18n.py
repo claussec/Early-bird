@@ -106,6 +106,7 @@ TEXTS: dict[str, dict[str, str]] = {
         "no": "Nein",
         "method.rules": "Regelbasiert",
         "method.template": "Regelbasierte Vorlage",
+        "llm.rules": "Regelbasiert (ohne LLM)",
         "origin.not_evaluated": "Nicht ausgewertet (Risk? = nein)",
         # Notifications
         "mail.subject": "[Frühwarnung] {name} ({number})",
@@ -224,6 +225,7 @@ TEXTS: dict[str, dict[str, str]] = {
         "no": "No",
         "method.rules": "Rule-based",
         "method.template": "Rule-based template",
+        "llm.rules": "Rule-based (no LLM)",
         "origin.not_evaluated": "Not evaluated (Risk? = no)",
         "mail.subject": "[Early warning] {name} ({number})",
         "mail.greeting": "Dear {name},",
@@ -253,6 +255,11 @@ TEXTS: dict[str, dict[str, str]] = {
 # Data-source names are proper names in both languages; the web categories are stored as
 # German keys and translated for display only.
 SOURCE_NAMES = ["Spend Cube", "Demand Planning", "Risk Management (Coface)", "Quality Management"]
+
+
+def num(v) -> str:
+    """Numbers as the browser engine prints them: 12.0 → "12", 0.5 → "0.5"."""
+    return str(int(v)) if isinstance(v, float) and v.is_integer() else str(v)
 
 
 def lang_or_default(lang: str | None) -> str:

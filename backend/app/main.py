@@ -203,11 +203,12 @@ def create_supplier(body: SupplierIn, lang: str | None = None):
 
 @app.put("/api/suppliers/{supplier_id}")
 def update_supplier(supplier_id: str, body: SupplierIn, lang: str | None = None):
-    _require_supplier(supplier_id)
+    existing = _require_supplier(supplier_id)
     other = db.find_supplier_by_number(body.number)
     if other and other["id"] != supplier_id:
         raise HTTPException(409, f"Lieferantennummer {body.number} existiert bereits")
-    db.upsert_master(_master_from_input(supplier_id, body))
+    # The source system stays the one the supplier came from.
+    db.upsert_master({**_master_from_input(supplier_id, body), "source": existing.get("source", body.source)})
     if body.figures:
         db.save_internal(supplier_id, body.figures.to_internal())
     report = pipeline.run_to_completion(supplier_id, lang=lang)

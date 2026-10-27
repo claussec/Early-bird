@@ -5,6 +5,7 @@
  * (Server variant: backend/app/modules/external_module.py crawls live.)
  */
 import type { ExternalDoc, Supplier } from '../types'
+import { tx, type Lang } from './texts'
 
 export const CATEGORIES = ['Finanzen', 'Personal', 'Management', 'Markt', 'Produktion', 'ESG', 'Presse'] as const
 
@@ -51,7 +52,7 @@ const SUCCESS_TERMS = [
 const SEVERE_TERMS = ['insolvenz', 'restrukturierung', 'zahlungsverzug', 'verzögerten zahlungen', 'banken']
 
 /** Rule-based fallback, identical to the server's keyword classifier. */
-export function keywordClassify(doc: Partial<ExternalDoc> & { title: string; hint?: string }): ExternalDoc {
+export function keywordClassify(doc: Partial<ExternalDoc> & { title: string; hint?: string }, lang: Lang): ExternalDoc {
   const text = `${doc.title} ${doc.rationale ?? ''}`.toLowerCase()
   const risk = RISK_TERMS.filter((t) => text.includes(t))
   const success = SUCCESS_TERMS.filter((t) => text.includes(t))
@@ -59,15 +60,19 @@ export function keywordClassify(doc: Partial<ExternalDoc> & { title: string; hin
   const base = { date: doc.date ?? '', title: doc.title, source: doc.source ?? '', url: doc.url ?? '', category }
   if (risk.length && risk.length >= success.length) {
     const severe = SEVERE_TERMS.some((t) => text.includes(t))
-    return { ...base, signal: 'risk', severity: severe ? 3 : 2, rationale: `Risikobegriffe erkannt: ${risk.join(', ')}` }
+    return { ...base, signal: 'risk', severity: severe ? 3 : 2, rationale: tx(lang, 'ext.risk_terms', { terms: risk.join(', ') }) }
   }
-  if (success.length) return { ...base, signal: 'success', severity: 1, rationale: `Erfolgsbegriffe erkannt: ${success.join(', ')}` }
-  return { ...base, signal: 'neutral', severity: 1, rationale: 'Kein eindeutiges Signal' }
+  if (success.length) return { ...base, signal: 'success', severity: 1, rationale: tx(lang, 'ext.success_terms', { terms: success.join(', ') }) }
+  return { ...base, signal: 'neutral', severity: 1, rationale: tx(lang, 'ext.no_signal') }
 }
 
-const SIGNAL_SPEC = `{"date": "JJJJ-MM-TT", "title": "Schlagzeile", "source": "Medium oder Website", "url": "https://…", "category": "${CATEGORIES.join(' | ')}", "signal": "risk | success | neutral", "severity": 1 | 2 | 3, "rationale": "1–2 Sätze, warum das für die finanzielle Stabilität relevant ist"}`
+const SIGNAL_SPEC: Record<Lang, string> = {
+  de: `{"date": "JJJJ-MM-TT", "title": "Schlagzeile", "source": "Medium oder Website", "url": "https://…", "category": "${CATEGORIES.join(' | ')}", "signal": "risk | success | neutral", "severity": 1 | 2 | 3, "rationale": "1–2 Sätze, warum das für die finanzielle Stabilität relevant ist"}`,
+  en: `{"date": "YYYY-MM-DD", "title": "Headline", "source": "Outlet or website", "url": "https://…", "category": "${CATEGORIES.join(' | ')}", "signal": "risk | success | neutral", "severity": 1 | 2 | 3, "rationale": "1–2 sentences on why this matters for financial stability"}`,
+}
 
-const RESEARCH_TASK = `Recherchiere im Web nach aktuellen Meldungen der letzten 24 Monate, die etwas über die finanzielle Stabilität aussagen.
+const RESEARCH_TASK: Record<Lang, string> = {
+  de: `Recherchiere im Web nach aktuellen Meldungen der letzten 24 Monate, die etwas über die finanzielle Stabilität aussagen.
 Achte besonders auf: Insolvenz oder Insolvenzgerüchte, Restrukturierung, Bankengespräche, Kurzarbeit, Stellenabbau, Werksschließungen, Verlagerungen, Verluste, verspätete Zahlungen, Wechsel in Geschäftsführung oder Finanzleitung, Verlust großer Kunden, Rückrufe, aber auch positive Signale wie Investitionen, neue Aufträge, Wachstum, neue Investoren.
 Nutze Unternehmenswebsite, Pressemitteilungen, Fach- und Lokalpresse, Handelsregister-/Bundesanzeiger-Meldungen und Arbeitgeberbewertungen.
 
@@ -75,43 +80,75 @@ Regeln:
 - Nur Meldungen, die sich eindeutig auf genau dieses Unternehmen beziehen (Namensgleichheit prüfen, Ort/Branche abgleichen).
 - Nichts erfinden. Wenn du nichts findest, gib eine leere Liste zurück.
 - signal: "risk" = Hinweis auf finanzielle Instabilität, "success" = Hinweis auf Stabilität, sonst "neutral".
-- severity: 3 = unmittelbar insolvenzrelevant, 2 = deutliches Warnsignal, 1 = schwaches Signal.`
+- severity: 3 = unmittelbar insolvenzrelevant, 2 = deutliches Warnsignal, 1 = schwaches Signal.
+- category: immer einer der deutschen Schlüssel oben.`,
+  en: `Search the web for recent reports from the last 24 months that say something about the company's financial stability.
+Look especially for: insolvency or insolvency rumours, restructuring, talks with banks, short-time work, job cuts, plant closures, relocations, losses, late payments, changes in management or finance leadership, loss of major customers, recalls, but also positive signals such as investments, new orders, growth, new investors.
+Use the company website, press releases, trade and local press, commercial register announcements and employer reviews.
 
-function describe(s: Supplier) {
+Rules:
+- Only reports that clearly refer to exactly this company (check for namesakes, compare location/industry).
+- Do not invent anything. If you find nothing, return an empty list.
+- signal: "risk" = sign of financial instability, "success" = sign of stability, otherwise "neutral".
+- severity: 3 = immediately relevant to insolvency, 2 = clear warning sign, 1 = weak signal.
+- category: always one of the German keys above (Finanzen = finance, Personal = workforce, Markt = market, Produktion = production, Presse = press).`,
+}
+
+const INTRO: Record<Lang, string> = {
+  de: 'Du unterstützt das Lieferanten-Risikomanagement im Automotive-Einkauf.',
+  en: 'You support supplier risk management in automotive purchasing.',
+}
+
+function describe(s: Supplier, lang: Lang) {
+  const L =
+    lang === 'de'
+      ? { number: 'Lieferantennummer', address: 'Adresse', website: 'Website', commodity: 'Warengruppe' }
+      : { number: 'Supplier number', address: 'Address', website: 'Website', commodity: 'Commodity' }
+  const address = [s.street, [s.zip, s.city].filter(Boolean).join(' '), s.country].filter(Boolean).join(', ')
   return [
     `Name: ${s.name}`,
-    `Lieferantennummer: ${s.number}`,
-    s.city || s.country ? `Standort: ${[s.city, s.country].filter(Boolean).join(', ')}` : '',
-    s.website ? `Website: ${s.website}` : '',
-    `Warengruppe: ${s.commodity}`,
+    `${L.number}: ${s.number}`,
+    address ? `${L.address}: ${address}` : '',
+    s.website ? `${L.website}: ${s.website}` : '',
+    `${L.commodity}: ${s.commodity}`,
   ]
     .filter(Boolean)
     .join('\n')
 }
 
-export function researchPrompt(s: Supplier) {
-  return `Du unterstützt das Lieferanten-Risikomanagement im Automotive-Einkauf. Prüfe den folgenden Lieferanten:
+export function researchPrompt(s: Supplier, lang: Lang) {
+  const check = lang === 'de' ? 'Prüfe den folgenden Lieferanten:' : 'Check the following supplier:'
+  const end = lang === 'de' ? 'Gib am Ende einen einzigen JSON-Codeblock aus, genau in dieser Form:' : 'Finish with a single JSON code block in exactly this form:'
+  return `${INTRO[lang]} ${check}
 
-${describe(s)}
+${describe(s, lang)}
 
-${RESEARCH_TASK}
+${RESEARCH_TASK[lang]}
 
-Gib am Ende einen einzigen JSON-Codeblock aus, genau in dieser Form:
+${end}
 \`\`\`json
-{"supplier_number": "${s.number}", "signals": [${SIGNAL_SPEC}]}
+{"supplier_number": "${s.number}", "signals": [${SIGNAL_SPEC[lang]}]}
 \`\`\``
 }
 
-export function batchResearchPrompt(suppliers: Supplier[]) {
-  return `Du unterstützt das Lieferanten-Risikomanagement im Automotive-Einkauf. Prüfe jeden der folgenden ${suppliers.length} Lieferanten einzeln:
+export function batchResearchPrompt(suppliers: Supplier[], lang: Lang) {
+  const check =
+    lang === 'de'
+      ? `Prüfe jeden der folgenden ${suppliers.length} Lieferanten einzeln:`
+      : `Check each of the following ${suppliers.length} suppliers individually:`
+  const end =
+    lang === 'de'
+      ? 'Gib am Ende einen einzigen JSON-Codeblock aus, mit einem Eintrag pro Lieferant (auch wenn nichts gefunden wurde), genau in dieser Form:'
+      : 'Finish with a single JSON code block with one entry per supplier (even if nothing was found), in exactly this form:'
+  return `${INTRO[lang]} ${check}
 
-${suppliers.map((s, i) => `${i + 1}.\n${describe(s)}`).join('\n\n')}
+${suppliers.map((s, i) => `${i + 1}.\n${describe(s, lang)}`).join('\n\n')}
 
-${RESEARCH_TASK}
+${RESEARCH_TASK[lang]}
 
-Gib am Ende einen einzigen JSON-Codeblock aus, mit einem Eintrag pro Lieferant (auch wenn nichts gefunden wurde), genau in dieser Form:
+${end}
 \`\`\`json
-[{"supplier_number": "…", "signals": [${SIGNAL_SPEC}]}]
+[{"supplier_number": "…", "signals": [${SIGNAL_SPEC[lang]}]}]
 \`\`\``
 }
 
@@ -138,7 +175,7 @@ export interface ParsedSignals {
   signals: ExternalDoc[]
 }
 
-function normalizeSignal(raw: Record<string, unknown>): ExternalDoc | null {
+function normalizeSignal(raw: Record<string, unknown>, lang: Lang): ExternalDoc | null {
   const title = String(raw.title ?? raw.titel ?? '').trim()
   if (!title) return null
   const signal = String(raw.signal ?? '').toLowerCase()
@@ -154,39 +191,39 @@ function normalizeSignal(raw: Record<string, unknown>): ExternalDoc | null {
   }
   if (!['risk', 'success', 'neutral'].includes(signal) || ![1, 2, 3].includes(severity)) {
     // Incomplete classification: fall back to the keyword classifier, keep Claude's rationale.
-    const k = keywordClassify(doc)
+    const k = keywordClassify(doc, lang)
     return { ...k, rationale: doc.rationale || k.rationale }
   }
   return { ...doc, signal: signal as ExternalDoc['signal'], severity: severity as ExternalDoc['severity'] }
 }
 
 /** Accepts {signals:[…]}, [{supplier_number, signals}], or a bare list of signals. */
-export function normalizeSignals(value: unknown): ParsedSignals[] {
+export function normalizeSignals(value: unknown, lang: Lang): ParsedSignals[] {
   const groups: ParsedSignals[] = []
   const asGroup = (v: Record<string, unknown>): ParsedSignals => ({
     supplier_number:
       v.supplier_number != null ? String(v.supplier_number) : v.lieferantennummer != null ? String(v.lieferantennummer) : null,
     signals: (Array.isArray(v.signals) ? v.signals : Array.isArray(v.signale) ? v.signale : [])
-      .map((s: unknown) => (s && typeof s === 'object' ? normalizeSignal(s as Record<string, unknown>) : null))
+      .map((s: unknown) => (s && typeof s === 'object' ? normalizeSignal(s as Record<string, unknown>, lang) : null))
       .filter((s): s is ExternalDoc => s !== null),
   })
   if (Array.isArray(value)) {
     const objects = value.filter((v) => v && typeof v === 'object') as Record<string, unknown>[]
     if (objects.some((o) => 'signals' in o || 'signale' in o)) objects.forEach((o) => groups.push(asGroup(o)))
-    else groups.push({ supplier_number: null, signals: objects.map(normalizeSignal).filter((s): s is ExternalDoc => s !== null) })
+    else groups.push({ supplier_number: null, signals: objects.map((o) => normalizeSignal(o, lang)).filter((s): s is ExternalDoc => s !== null) })
   } else if (value && typeof value === 'object') {
     groups.push(asGroup(value as Record<string, unknown>))
   }
   return groups
 }
 
-export function structurePrompt(text: string, suppliers: Supplier[]) {
-  return `Der folgende Text ist eine Web-Recherche zu einem oder mehreren Lieferanten. Extrahiere daraus alle Meldungen, die etwas über die finanzielle Stabilität aussagen. Erfinde nichts, übernimm nur, was im Text steht.
+export function structurePrompt(text: string, suppliers: Supplier[], lang: Lang) {
+  return `The following text is web research on one or more suppliers. Extract every report that says something about financial stability. Do not invent anything; take over only what the text says. ${tx(lang, 'language')} (rationale)
 
-Bekannte Lieferanten: ${suppliers.map((s) => `${s.number} = ${s.name}`).join('; ')}
+Known suppliers: ${suppliers.map((s) => `${s.number} = ${s.name}`).join('; ')}
 
-Antworte nur mit einem JSON-Array, ein Eintrag pro Lieferant, genau in dieser Form:
-[{"supplier_number": "…", "signals": [${SIGNAL_SPEC}]}]
+Answer only with a JSON array, one entry per supplier, in exactly this form:
+[{"supplier_number": "…", "signals": [${SIGNAL_SPEC[lang]}]}]
 
 Text:
 """

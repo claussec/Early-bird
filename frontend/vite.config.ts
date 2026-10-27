@@ -3,15 +3,17 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { viteSingleFile } from 'vite-plugin-singlefile'
 
-// `vite build --mode artifact` produces one self-contained HTML file for claude.ai
-// (agents run in the browser, see src/backend/artifact.ts). Every other mode builds the
-// server frontend that talks to the FastAPI backend.
+// Three builds from one code base (see src/backend/index.ts):
+//   default            → server frontend that talks to the FastAPI backend
+//   --mode artifact    → one self-contained HTML file for claude.ai (agents run in the browser)
+//   --mode demo        → one self-contained HTML file to host anywhere (demo data, rule-based)
 export default defineConfig(({ mode }) => {
-  const artifact = mode === 'artifact'
+  const target = mode === 'artifact' || mode === 'demo' ? mode : 'server'
+  const single = target !== 'server'
   return {
-    plugins: [react(), tailwindcss(), ...(artifact ? [viteSingleFile()] : [])],
-    define: { 'import.meta.env.VITE_TARGET': JSON.stringify(artifact ? 'artifact' : 'server') },
-    build: artifact ? { outDir: 'dist-artifact', chunkSizeWarningLimit: 4000 } : undefined,
+    plugins: [react(), tailwindcss(), ...(single ? [viteSingleFile()] : [])],
+    define: { 'import.meta.env.VITE_TARGET': JSON.stringify(target) },
+    build: single ? { outDir: `dist-${target}`, chunkSizeWarningLimit: 6000 } : undefined,
     server: {
       proxy: { '/api': 'http://localhost:8000' },
     },

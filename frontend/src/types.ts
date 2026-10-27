@@ -3,22 +3,57 @@ export type Light = 'green' | 'yellow' | 'red'
 /** Result of the two decisions in Figure 2: "Risk?" (Internal Data agent) and "Escalation?" (Decision Maker). */
 export type RiskStatus = 'none' | 'risk' | 'escalated'
 
+export type Lang = 'de' | 'en'
+
 export interface Buyer {
   name: string
   email: string
 }
 
-export interface Supplier {
+/** Coordinates for the map; `precision` says how exactly the address was located. */
+export interface GeoLocation {
+  lat: number
+  lon: number
+  precision: 'address' | 'city' | 'country' | 'manual'
+  source: string
+}
+
+export interface Address {
+  street?: string
+  zip?: string
+  city: string
+  country: string
+  location?: GeoLocation | null
+}
+
+export interface Contact {
+  name: string
+  email: string
+  role: string
+}
+
+/** A plant of the buying organization. Its contacts are warned about every linked supplier. */
+export interface Plant extends Address {
+  id: string
+  name: string
+  contacts: Contact[]
+  supplier_ids?: string[]
+}
+
+export interface Recipient extends Contact {
+  plant: string
+}
+
+export interface Supplier extends Address {
   id: string
   number: string
   name: string
-  city: string
-  country: string
   website: string
   commodity: string
   buyer: Buyer
   register_status: Light
   source: string
+  plant_ids?: string[]
   status?: RiskStatus
   escalate?: boolean
   risk_indicators?: number
@@ -55,7 +90,7 @@ export interface Indicator {
   /** Risk indicators: "strong" above the critical threshold, "weak" above the warning threshold. */
   strength: 'strong' | 'weak' | null
   /** Financial signals are prioritized over external and operational ones. */
-  priority: 'finanziell' | 'extern' | 'operativ'
+  priority: 'financial' | 'external' | 'operational'
   value: string
   source: string
   evidence: string
@@ -87,6 +122,8 @@ export interface Report {
   supplier_id: string
   created_at: string
   llm: string
+  /** Language of the generated texts. */
+  lang?: Lang
   as_of: string
   status: RiskStatus
   risk_check: { risk: boolean; reasoning: string; method: string }
@@ -126,6 +163,8 @@ export interface Notification {
   supplier_id: string
   created_at: string
   recipient: string
+  recipients?: Recipient[]
+  plants?: string[]
   subject: string
   body: string
   channel: string
@@ -143,19 +182,34 @@ export interface Automode {
   enabled: boolean
   interval_minutes: number
   channels: string[]
+  lang?: Lang
   last_run: string | null
   next_run: string | null
   running: boolean
   last_result: { suppliers: number; escalations: number; sent: number; failed: number; source_notes: string[] } | null
 }
 
-export interface SupplierInput {
+export interface AddressInput {
+  street: string
+  zip: string
+  city: string
+  country: string
+  /** Optional manual coordinates; otherwise the address is geocoded. */
+  lat: number | null
+  lon: number | null
+}
+
+export interface PlantInput extends AddressInput {
+  name: string
+  contacts: Contact[]
+}
+
+export interface SupplierInput extends AddressInput {
   number: string
   name: string
   commodity: string
-  city: string
-  country: string
   website: string
+  plant_ids: string[]
   buyer_name: string
   buyer_email: string | null
   register_status: Light
@@ -176,11 +230,13 @@ export interface Meta {
   crawler_enabled: boolean
   commodities: string[]
   countries: string[]
-  steps: [string, string, string][]
+  /** Step ids of the pipeline in workflow order. */
+  steps: string[]
+  default_lang?: Lang
 }
 
 /** Which build is running: the server app (REST API) or the claude.ai artifact (agents in the browser). */
-export type Target = 'server' | 'artifact'
+export type Target = 'server' | 'artifact' | 'demo'
 
 export type AgentMode = 'claude' | 'rules'
 
@@ -194,6 +250,7 @@ export interface Filters {
   statuses: RiskStatus[]
   commodities: string[]
   countries: string[]
+  plants: string[]
   escalatedOnly: boolean
   highDependency: boolean
   minPd: number

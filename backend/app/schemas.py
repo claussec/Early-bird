@@ -100,6 +100,11 @@ class Contact(BaseModel):
     email: EmailStr | None = None
     role: str = Field(default="", max_length=80)
 
+    @field_validator("email", mode="before")
+    @classmethod
+    def blank_email(cls, v):
+        return v.strip() or None if isinstance(v, str) else v
+
 
 class PlantIn(Address):
     """A plant of the buying organization; its contacts are warned about linked suppliers."""

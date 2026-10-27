@@ -3,6 +3,7 @@ import { Canvas } from '@react-three/fiber'
 import { Bloom, EffectComposer, Vignette } from '@react-three/postprocessing'
 import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
+import { useI18n } from '../i18n'
 import { RISK } from '../theme'
 import type { Supplier } from '../types'
 import { SECTOR_RADIUS, layoutSuppliers } from './layout'
@@ -58,7 +59,8 @@ function SectorLines({ sectors }: { sectors: { name: string; center: number; sta
   )
 }
 
-export function Scene({ suppliers, commodities, visible, selectedId, hoveredId, onSelect, onHover }: Props) {
+export function RadarScene({ suppliers, commodities, visible, selectedId, hoveredId, onSelect, onHover }: Props) {
+  const { t } = useI18n()
   const controls = useRef<CameraControls>(null)
   const { positions, sectors } = useMemo(() => layoutSuppliers(suppliers, commodities), [suppliers, commodities])
 
@@ -104,7 +106,7 @@ export function Scene({ suppliers, commodities, visible, selectedId, hoveredId, 
         infiniteGrid
       />
       <SectorLines sectors={sectors} />
-      <Plant />
+      <Plant label={t('scene.plant')} />
 
       {suppliers.map((s) => {
         const p = positions[s.id]

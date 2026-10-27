@@ -15,7 +15,7 @@ from statistics import mean, pstdev
 
 from pydantic import BaseModel
 
-from ..i18n import SOURCE_NAMES, t
+from ..i18n import SOURCE_NAMES, num, t
 from ..llm import LLM, LLMUnavailable
 
 # Thresholds of the standardized assessment. The 50 % customer-share limit and the
@@ -248,7 +248,7 @@ def _rating_kpis(pd_hist: list[dict], as_of: str, lang: str) -> list[dict]:
             "value": round(pd_change, 2),
             "unit": "pp",
             "status": _status_high_is_bad(pd_change, "pd_change_pp"),
-            "formula": f"{pd_latest['pd']} % − {base['pd']} %",
+            "formula": f"{num(pd_latest['pd'])} % − {num(base['pd'])} %",
             "threshold": t(lang, "kpi.pd_trend.threshold"),
             "source": "Risk Management (Coface)",
         }
@@ -374,7 +374,7 @@ def rule_risk_check(kpis: list[dict], lang: str = "de") -> RiskCheck:
     if not flagged:
         return RiskCheck(risk=False, reasoning=t(lang, "risk.all_ok"))
     listed = "; ".join(
-        t(lang, "risk.item", label=k["label"], value=k["value"], unit=k["unit"], threshold=k["threshold"]) for k in flagged[:5]
+        t(lang, "risk.item", label=k["label"], value=num(k["value"]), unit=k["unit"], threshold=k["threshold"]) for k in flagged[:5]
     )
     return RiskCheck(risk=True, reasoning=t(lang, "risk.flagged", n=len(flagged), listed=listed))
 

@@ -3,8 +3,8 @@ import { useFrame } from '@react-three/fiber'
 import { useRef } from 'react'
 import type { Mesh } from 'three'
 
-/** The buying organization's plant in the center of the supplier network. */
-export function Plant() {
+/** A plant of the buying organization: centre of the radar, or a hub on the map. */
+export function Plant({ label, highlighted = false }: { label: string; highlighted?: boolean }) {
   const ring = useRef<Mesh>(null)
   useFrame((_, dt) => {
     if (ring.current) ring.current.rotation.z += dt * 0.15
@@ -66,8 +66,12 @@ export function Plant() {
         </mesh>
       ))}
       <Html position={[0, 7.8, 0]} center distanceFactor={38} zIndexRange={[10, 0]}>
-        <div className="pointer-events-none whitespace-nowrap rounded-full border border-white/10 bg-black/60 px-3 py-1 text-[13px] font-semibold tracking-wide text-ink-1">
-          Werk · Abnehmer
+        <div
+          className={`pointer-events-none whitespace-nowrap rounded-full border px-3 py-1 text-[13px] font-semibold tracking-wide text-ink-1 ${
+            highlighted ? 'border-accent/70 bg-accent/30' : 'border-white/10 bg-black/60'
+          }`}
+        >
+          {label}
         </div>
       </Html>
     </group>

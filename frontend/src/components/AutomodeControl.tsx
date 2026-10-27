@@ -1,20 +1,21 @@
 import { Bot, Loader2, Play, Power } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { Backend } from '../backend'
-import type { Automode, Channel } from '../types'
+import { useI18n } from '../i18n'
+import { fmtDate as when } from '../theme'
+import type { Automode, Channel, Lang } from '../types'
 import { Toggle } from './ui'
 
 const INTERVALS = [
-  { minutes: 60, label: 'stündlich' },
-  { minutes: 60 * 24, label: 'täglich' },
-  { minutes: 60 * 24 * 7, label: 'wöchentlich' },
-  { minutes: 60 * 24 * 30, label: 'monatlich' },
+  { minutes: 60, label: 'auto.hourly' },
+  { minutes: 60 * 24, label: 'auto.daily' },
+  { minutes: 60 * 24 * 7, label: 'auto.weekly' },
+  { minutes: 60 * 24 * 30, label: 'auto.monthly' },
 ]
-
-const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' }) : '–')
 
 /** Auto mode: evaluates all stored supplier numbers on a schedule and notifies buyers. */
 export function AutomodeControl({ api, onCycleFinished }: { api: NonNullable<Backend['automode']>; onCycleFinished: () => void }) {
+  const { t } = useI18n()
   const [state, setState] = useState<Automode | null>(null)
   const [channels, setChannels] = useState<Channel[]>([])
   const [open, setOpen] = useState(false)
@@ -71,20 +72,17 @@ export function AutomodeControl({ api, onCycleFinished }: { api: NonNullable<Bac
         ) : (
           <Power size={15} className={state.enabled ? 'text-good' : 'text-ink-3'} />
         )}
-        <span className="hidden sm:inline">Automode {state.enabled ? 'an' : 'aus'}</span>
+        <span className="hidden lg:inline">{t('auto.label', { state: t(state.enabled ? 'auto.on' : 'auto.off') })}</span>
       </button>
       {open && (
         <div className="glass absolute right-0 top-12 z-50 w-[min(340px,calc(100vw-24px))] rounded-2xl p-4 text-xs text-ink-2">
           <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-ink-1">
-            <Bot size={16} className="text-accent" /> Automode
+            <Bot size={16} className="text-accent" /> {t('auto.label', { state: '' })}
           </div>
-          <p className="mb-3 text-ink-3">
-            Prüft alle hinterlegten Lieferantennummern, aktualisiert die Daten aus den Quellsystemen und benachrichtigt die
-            Einkäufer bei Eskalationen automatisch.
-          </p>
-          <Toggle label="Automatisch ausführen" checked={state.enabled} onChange={(v) => update({ enabled: v })} />
+          <p className="mb-3 text-ink-3">{t('auto.desc')}</p>
+          <Toggle label={t('auto.enabled')} checked={state.enabled} onChange={(v) => update({ enabled: v })} />
           <label className="mt-2 flex items-center justify-between gap-3">
-            Intervall
+            {t('auto.interval')}
             <select
               value={state.interval_minutes}
               onChange={(e) => update({ interval_minutes: Number(e.target.value) })}
@@ -92,17 +90,28 @@ export function AutomodeControl({ api, onCycleFinished }: { api: NonNullable<Bac
             >
               {INTERVALS.map((i) => (
                 <option key={i.minutes} value={i.minutes}>
-                  {i.label}
+                  {t(i.label)}
                 </option>
               ))}
               {!INTERVALS.some((i) => i.minutes === state.interval_minutes) && (
-                <option value={state.interval_minutes}>alle {state.interval_minutes} min</option>
+                <option value={state.interval_minutes}>{t('auto.every', { n: state.interval_minutes })}</option>
               )}
+            </select>
+          </label>
+          <label className="mt-2 flex items-center justify-between gap-3">
+            {t('auto.lang')}
+            <select
+              value={state.lang ?? 'de'}
+              onChange={(e) => update({ lang: e.target.value as Lang })}
+              className="rounded-lg border border-line bg-surface-0 px-2 py-1 text-ink-1"
+            >
+              <option value="de">{t('lang.de')}</option>
+              <option value="en">{t('lang.en')}</option>
             </select>
           </label>
 
           <div className="mt-3 border-t border-line pt-3">
-            <div className="mb-1.5 font-medium text-ink-1">Benachrichtigen über</div>
+            <div className="mb-1.5 font-medium text-ink-1">{t('auto.channels')}</div>
             {external.map((c) => (
               <label key={c.id} className="flex items-center justify-between py-1">
                 <span className="flex items-center gap-2">
@@ -115,19 +124,23 @@ export function AutomodeControl({ api, onCycleFinished }: { api: NonNullable<Bac
                   />
                   {c.name}
                 </span>
-                <span className={c.configured ? 'text-good' : 'text-ink-3'}>{c.configured ? 'verbunden' : 'nicht konfiguriert'}</span>
+                <span className={c.configured ? 'text-good' : 'text-ink-3'}>{c.configured ? t('auto.connected') : t('auto.not_configured')}</span>
               </label>
             ))}
-            <div className="py-1 text-ink-3">Cockpit-Benachrichtigung ist immer aktiv.</div>
+            <div className="py-1 text-ink-3">{t('auto.cockpit_always')}</div>
           </div>
 
           <div className="mt-3 space-y-0.5 border-t border-line pt-3 text-ink-3">
-            <div>Letzter Lauf: {when(state.last_run)}</div>
-            {state.enabled && <div>Nächster Lauf: {when(state.next_run)}</div>}
+            <div>{t('auto.last_run', { when: when(state.last_run) })}</div>
+            {state.enabled && <div>{t('auto.next_run', { when: when(state.next_run) })}</div>}
             {state.last_result && (
               <div>
-                {state.last_result.suppliers} Lieferanten · {state.last_result.escalations} Eskalationen · {state.last_result.sent} versendet
-                {state.last_result.failed > 0 && <span className="text-[#ff8a8a]"> · {state.last_result.failed} fehlgeschlagen</span>}
+                {t('auto.result', {
+                  suppliers: state.last_result.suppliers,
+                  escalations: state.last_result.escalations,
+                  sent: state.last_result.sent,
+                })}
+                {state.last_result.failed > 0 && <span className="text-[#ff8a8a]">{t('auto.failed', { n: state.last_result.failed })}</span>}
               </div>
             )}
           </div>
@@ -138,7 +151,7 @@ export function AutomodeControl({ api, onCycleFinished }: { api: NonNullable<Bac
             className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-accent/50 px-3 py-2 font-semibold text-ink-1 hover:bg-accent/10 disabled:opacity-60"
           >
             {state.running ? <Loader2 size={14} className="spin" /> : <Play size={14} />}
-            {state.running ? 'Lauf aktiv …' : 'Jetzt ausführen'}
+            {state.running ? t('auto.running') : t('auto.run')}
           </button>
         </div>
       )}

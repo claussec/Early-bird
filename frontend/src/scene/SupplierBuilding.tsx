@@ -2,6 +2,7 @@ import { Edges, Html, QuadraticBezierLine } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import { useMemo, useRef } from 'react'
 import * as THREE from 'three'
+import { useI18n } from '../i18n'
 import { GLOW, RISK, STATUS, fmtUnit, joinDot } from '../theme'
 import type { Light, Supplier } from '../types'
 
@@ -14,6 +15,8 @@ interface Props {
   hovered: boolean
   onSelect: (id: string) => void
   onHover: (id: string | null) => void
+  /** Map view: smaller buildings so neighbouring cities stay apart. */
+  scale?: number
 }
 
 const WIDTH = 2.4
@@ -22,7 +25,8 @@ export function buildingHeight(s: Supplier) {
   return 1.4 + Math.min(9, (s.purchase_volume ?? 5) * 0.32)
 }
 
-export function SupplierBuilding({ supplier: s, x, z, dimmed, selected, hovered, onSelect, onHover }: Props) {
+export function SupplierBuilding({ supplier: s, x, z, dimmed, selected, hovered, onSelect, onHover, scale = 1 }: Props) {
+  const { t } = useI18n()
   const light: Light = RISK[s.status ?? 'none'].light
   const glow = GLOW[light]
   const h = buildingHeight(s)
@@ -55,7 +59,7 @@ export function SupplierBuilding({ supplier: s, x, z, dimmed, selected, hovered,
   })
 
   return (
-    <group position={[x, 0, z]}>
+    <group position={[x, 0, z]} scale={scale}>
       {/* hit area larger than the mark */}
       <mesh
         position={[0, h / 2, 0]}
@@ -134,19 +138,19 @@ export function SupplierBuilding({ supplier: s, x, z, dimmed, selected, hovered,
       )}
 
       {(hovered || selected) && !dimmed && (
-        <Html position={[0, h + 3.2, 0]} center zIndexRange={[20, 10]}>
+        <Html position={[0, h + 3.2 / scale, 0]} center zIndexRange={[20, 10]}>
           <div className="glass pointer-events-none w-56 rounded-xl px-3 py-2 text-xs">
             <div className="font-semibold text-ink-1">{s.name}</div>
             <div className="mt-0.5 text-ink-3">{joinDot(s.city, s.country, s.commodity)}</div>
             <div className="mt-2 flex items-center gap-2">
               <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: STATUS[light].color }} />
-              <span className="font-medium text-ink-1">{RISK[s.status ?? 'none'].label}</span>
-              {(s.risk_indicators ?? 0) > 0 && <span className="text-ink-3">· {s.risk_indicators} Risikoindikatoren</span>}
+              <span className="font-medium text-ink-1">{t(`risk.${s.status ?? 'none'}`)}</span>
+              {(s.risk_indicators ?? 0) > 0 && <span className="text-ink-3">· {t('scene.risk_indicators', { n: s.risk_indicators ?? 0 })}</span>}
             </div>
             <div className="mt-1 grid grid-cols-2 gap-x-2 text-ink-3">
-              <span>Customer-Share</span>
+              <span>{t('scene.customer_share')}</span>
               <span className="text-right text-ink-2">{fmtUnit(s.customer_share, '%')}</span>
-              <span>PD (Coface)</span>
+              <span>{t('scene.pd')}</span>
               <span className="text-right text-ink-2">{fmtUnit(s.pd, '%', 2)}</span>
             </div>
             {s.recommendation && s.status !== 'none' && (
