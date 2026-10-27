@@ -16,6 +16,8 @@ class SupplierRecord(BaseModel):
     source: str
     number: str
     name: str
+    street: str = ""
+    zip: str = ""
     city: str = ""
     country: str = ""
     website: str = ""

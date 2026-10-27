@@ -9,13 +9,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import automode, db, pipeline, seed
+from . import automode, db, geo, pipeline, seed
 from .config import settings
 from .connectors import ConnectorError, all_connectors, get_connector, search_all
 from .llm import LLM
 from .modules.internal_module import THRESHOLDS
 from .notifiers import all_notifiers
-from .schemas import AutomodeUpdate, ImportRequest, SupplierIn
+from .schemas import AutomodeUpdate, ImportRequest, PlantIn, SupplierIn
 
 FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
@@ -80,11 +80,20 @@ def _require_supplier(supplier_id: str) -> dict:
     return master
 
 
+def _check_plants(plant_ids: list[str]) -> list[str]:
+    unknown = [p for p in plant_ids if db.get_plant(p) is None]
+    if unknown:
+        raise HTTPException(400, f"Unbekanntes Werk: {', '.join(unknown)}")
+    return list(dict.fromkeys(plant_ids))
+
+
 def _master_from_input(supplier_id: str, body: SupplierIn) -> dict:
-    return {
+    master = {
         "id": supplier_id,
         "number": body.number,
         "name": body.name,
+        "street": body.street,
+        "zip": body.zip,
         "city": body.city,
         "country": body.country,
         "website": body.website,
@@ -92,7 +101,29 @@ def _master_from_input(supplier_id: str, body: SupplierIn) -> dict:
         "buyer": {"name": body.buyer_name, "email": str(body.buyer_email or "")},
         "register_status": body.register_status,
         "source": body.source,
+        "plant_ids": _check_plants(body.plant_ids),
     }
+    master["location"] = geo.locate(master, body.lat, body.lon)
+    return master
+
+
+def _plant_from_input(plant_id: str, body: PlantIn) -> dict:
+    plant = {
+        "id": plant_id,
+        "name": body.name,
+        "street": body.street,
+        "zip": body.zip,
+        "city": body.city,
+        "country": body.country,
+        "contacts": [{"name": c.name, "email": str(c.email or ""), "role": c.role} for c in body.contacts],
+    }
+    plant["location"] = geo.locate(plant, body.lat, body.lon)
+    return plant
+
+
+def _plant_summary(plant: dict) -> dict:
+    linked = [s["id"] for s in db.list_suppliers() if plant["id"] in s.get("plant_ids", [])]
+    return {**plant, "supplier_ids": linked}
 
 
 # --- Meta ------------------------------------------------------------------------------
@@ -109,7 +140,39 @@ def meta():
         "countries": sorted({s["country"] for s in suppliers if s["country"]}),
         "thresholds": THRESHOLDS,
         "steps": pipeline.STEPS,
+        "default_lang": settings.default_lang,
     }
+
+
+# --- Plants of the buying organization ---------------------------------------------------
+
+
+@app.get("/api/plants")
+def plants():
+    return [_plant_summary(p) for p in db.list_plants()]
+
+
+@app.post("/api/plants", status_code=201)
+def create_plant(body: PlantIn):
+    plant = _plant_from_input(db.next_plant_id(), body)
+    db.upsert_plant(plant)
+    return _plant_summary(plant)
+
+
+@app.put("/api/plants/{plant_id}")
+def update_plant(plant_id: str, body: PlantIn):
+    if not db.get_plant(plant_id):
+        raise HTTPException(404, "Werk nicht gefunden")
+    plant = _plant_from_input(plant_id, body)
+    db.upsert_plant(plant)
+    return _plant_summary(plant)
+
+
+@app.delete("/api/plants/{plant_id}", status_code=204)
+def delete_plant(plant_id: str):
+    if not db.get_plant(plant_id):
+        raise HTTPException(404, "Werk nicht gefunden")
+    db.delete_plant(plant_id)
 
 
 # --- Suppliers -------------------------------------------------------------------------
@@ -128,18 +191,18 @@ def suppliers(q: str = ""):
 
 
 @app.post("/api/suppliers", status_code=201)
-def create_supplier(body: SupplierIn):
+def create_supplier(body: SupplierIn, lang: str | None = None):
     if db.find_supplier_by_number(body.number):
         raise HTTPException(409, f"Lieferantennummer {body.number} existiert bereits")
     supplier_id = db.next_supplier_id()
     internal = body.figures.to_internal() if body.figures else {}
     db.upsert_supplier(_master_from_input(supplier_id, body), internal, [])
-    report = pipeline.run_to_completion(supplier_id)
+    report = pipeline.run_to_completion(supplier_id, lang=lang)
     return _summary(db.get_supplier(supplier_id), report)
 
 
 @app.put("/api/suppliers/{supplier_id}")
-def update_supplier(supplier_id: str, body: SupplierIn):
+def update_supplier(supplier_id: str, body: SupplierIn, lang: str | None = None):
     _require_supplier(supplier_id)
     other = db.find_supplier_by_number(body.number)
     if other and other["id"] != supplier_id:
@@ -147,7 +210,7 @@ def update_supplier(supplier_id: str, body: SupplierIn):
     db.upsert_master(_master_from_input(supplier_id, body))
     if body.figures:
         db.save_internal(supplier_id, body.figures.to_internal())
-    report = pipeline.run_to_completion(supplier_id)
+    report = pipeline.run_to_completion(supplier_id, lang=lang)
     return _summary(db.get_supplier(supplier_id), report)
 
 
@@ -172,20 +235,20 @@ def supplier(supplier_id: str):
 
 
 @app.post("/api/suppliers/{supplier_id}/analyze")
-def analyze(supplier_id: str):
+def analyze(supplier_id: str, lang: str | None = None):
     _require_supplier(supplier_id)
-    return _sse(pipeline.run(supplier_id))
+    return _sse(pipeline.run(supplier_id, lang=lang))
 
 
 @app.post("/api/cycle")
-def quarterly_cycle():
+def quarterly_cycle(lang: str | None = None):
     """Runs the evaluation for the whole supplier base (escalations go to the cockpit only)."""
 
     def events():
         llm = LLM()
         for s in db.list_suppliers():
             yield {"type": "supplier", "supplier_id": s["id"], "name": s["name"]}
-            report = pipeline.run_to_completion(s["id"], llm)
+            report = pipeline.run_to_completion(s["id"], llm, lang=lang)
             yield {
                 "type": "supplier_done",
                 "supplier_id": s["id"],
@@ -214,7 +277,7 @@ def search_sources(q: str = Query(min_length=1), source: list[str] | None = Quer
 
 
 @app.post("/api/suppliers/import", status_code=201)
-def import_supplier(body: ImportRequest):
+def import_supplier(body: ImportRequest, lang: str | None = None):
     """Creates a supplier from a source system and adds it to the monitoring."""
     connector = get_connector(body.source)
     if connector is None:
@@ -232,6 +295,8 @@ def import_supplier(body: ImportRequest):
         "id": supplier_id,
         "number": record.number,
         "name": record.name,
+        "street": record.street,
+        "zip": record.zip,
         "city": record.city,
         "country": record.country,
         "website": record.website,
@@ -239,13 +304,15 @@ def import_supplier(body: ImportRequest):
         "buyer": {"name": record.buyer_name or body.buyer_name, "email": record.buyer_email or str(body.buyer_email or "")},
         "register_status": "green",
         "source": connector.id,
+        "plant_ids": _check_plants(body.plant_ids),
     }
+    master["location"] = geo.locate(master)
     try:
         internal = connector.get_internal_data(record.number) or {}
     except (NotImplementedError, ConnectorError):
         internal = {}
     db.upsert_supplier(master, internal, [])
-    return _summary(master, pipeline.run_to_completion(supplier_id))
+    return _summary(master, pipeline.run_to_completion(supplier_id, lang=lang))
 
 
 # --- Notifications & auto mode ---------------------------------------------------------

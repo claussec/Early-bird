@@ -40,6 +40,10 @@ CREATE TABLE IF NOT EXISTS notifications (
     status TEXT NOT NULL DEFAULT 'sent',
     error TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS plants (
+    id TEXT PRIMARY KEY,
+    data JSON NOT NULL
+);
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value JSON NOT NULL
@@ -113,6 +117,36 @@ def delete_supplier(supplier_id: str) -> None:
         for table in ("notifications", "results", "external_data", "internal_data"):
             c.execute(f"DELETE FROM {table} WHERE supplier_id = ?", (supplier_id,))
         c.execute("DELETE FROM suppliers WHERE id = ?", (supplier_id,))
+
+
+def list_plants() -> list[dict]:
+    with connect() as c:
+        return [json.loads(r["data"]) for r in c.execute("SELECT data FROM plants ORDER BY id")]
+
+
+def get_plant(plant_id: str) -> dict | None:
+    with connect() as c:
+        row = c.execute("SELECT data FROM plants WHERE id = ?", (plant_id,)).fetchone()
+        return json.loads(row["data"]) if row else None
+
+
+def upsert_plant(plant: dict) -> None:
+    with connect() as c:
+        c.execute("INSERT OR REPLACE INTO plants VALUES (?, ?)", (plant["id"], json.dumps(plant)))
+
+
+def delete_plant(plant_id: str) -> None:
+    """Deletes a plant and removes it from every supplier linked to it."""
+    with connect() as c:
+        c.execute("DELETE FROM plants WHERE id = ?", (plant_id,))
+    for s in list_suppliers():
+        if plant_id in s.get("plant_ids", []):
+            upsert_master({**s, "plant_ids": [p for p in s["plant_ids"] if p != plant_id]})
+
+
+def next_plant_id() -> str:
+    numeric = [int(p["id"][1:]) for p in list_plants() if p["id"][1:].isdigit()]
+    return f"P{max(numeric, default=0) + 1:02d}"
 
 
 def get_setting(key: str, default=None):

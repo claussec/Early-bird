@@ -57,28 +57,55 @@ class SupplierFigures(BaseModel):
         return data
 
 
-class SupplierIn(BaseModel):
+class Address(BaseModel):
+    street: str = ""
+    zip: str = Field(default="", max_length=12)
+    city: str = ""
+    country: str = Field(default="", max_length=3, description="ISO 3166-1 alpha-2, e.g. DE")
+    # Optional manual coordinates; otherwise the address is geocoded.
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lon: float | None = Field(default=None, ge=-180, le=180)
+
+    @field_validator("street", "zip", "city")
+    @classmethod
+    def strip_text(cls, v: str) -> str:
+        return v.strip()
+
+    @field_validator("country")
+    @classmethod
+    def upper_country(cls, v: str) -> str:
+        return v.strip().upper()
+
+
+class SupplierIn(Address):
     number: str = Field(min_length=1, max_length=40)
     name: str = Field(min_length=2, max_length=200)
     commodity: str = Field(default="Sonstige", min_length=1, max_length=80)
-    city: str = ""
-    country: str = Field(default="", max_length=3)
     website: str = ""
+    plant_ids: list[str] = []
     buyer_name: str = ""
     buyer_email: EmailStr | None = None
     register_status: Literal["green", "yellow", "red"] = "green"
     source: str = "manual"
     figures: SupplierFigures | None = None
 
-    @field_validator("number", "name", "commodity", "city", "website", "buyer_name")
+    @field_validator("number", "name", "commodity", "website", "buyer_name")
     @classmethod
     def strip(cls, v: str) -> str:
         return v.strip()
 
-    @field_validator("country")
-    @classmethod
-    def upper(cls, v: str) -> str:
-        return v.strip().upper()
+
+class Contact(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    email: EmailStr | None = None
+    role: str = Field(default="", max_length=80)
+
+
+class PlantIn(Address):
+    """A plant of the buying organization; its contacts are warned about linked suppliers."""
+
+    name: str = Field(min_length=2, max_length=120)
+    contacts: list[Contact] = []
 
 
 class ImportRequest(BaseModel):
@@ -89,9 +116,11 @@ class ImportRequest(BaseModel):
     commodity: str = "Sonstige"
     buyer_name: str = ""
     buyer_email: EmailStr | None = None
+    plant_ids: list[str] = []
 
 
 class AutomodeUpdate(BaseModel):
     enabled: bool | None = None
     interval_minutes: int | None = Field(default=None, ge=5, le=60 * 24 * 31)
     channels: list[Literal["inapp", "outlook", "teams"]] | None = None
+    lang: Literal["de", "en"] | None = None

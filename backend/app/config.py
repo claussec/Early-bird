@@ -31,6 +31,11 @@ class Settings:
     # Artificial delay between pipeline steps in demo mode, so the UI can show the workflow.
     demo_step_delay: float = field(default_factory=lambda: float(_env("DEMO_STEP_DELAY", "0.6")))
 
+    # Geocoding for the map: "offline" (bundled gazetteer) or "nominatim" (OpenStreetMap).
+    geocoder: str = field(default_factory=lambda: _env("GEOCODER", "offline"))
+    # Default language of generated texts (reports, notifications) when a request names none.
+    default_lang: str = field(default_factory=lambda: _env("DEFAULT_LANG", "de"))
+
     # --- Source systems (supplier master and transactional data) -------------------------
     sap_base_url: str = field(default_factory=lambda: _env("SAP_BASE_URL"))
     sap_client: str = field(default_factory=lambda: _env("SAP_CLIENT"))

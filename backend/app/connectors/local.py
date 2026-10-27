@@ -9,6 +9,8 @@ def _record(master: dict) -> SupplierRecord:
         source=master.get("source", "manual"),
         number=master["number"],
         name=master["name"],
+        street=master.get("street", ""),
+        zip=master.get("zip", ""),
         city=master.get("city", ""),
         country=master.get("country", ""),
         website=master.get("website", ""),

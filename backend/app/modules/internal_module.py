@@ -15,6 +15,7 @@ from statistics import mean, pstdev
 
 from pydantic import BaseModel
 
+from ..i18n import SOURCE_NAMES, t
 from ..llm import LLM, LLMUnavailable
 
 # Thresholds of the standardized assessment. The 50 % customer-share limit and the
@@ -34,7 +35,7 @@ THRESHOLDS = {
 
 FORECAST_HORIZON = 4
 OTHER_BUSINESS_GROWTH_CAP = 0.05
-SOURCES = ["Spend Cube", "Demand Planning", "Risk Management (Coface)", "Quality Management"]
+SOURCES = SOURCE_NAMES
 
 
 def _status_high_is_bad(value: float, key: str) -> str:
@@ -106,7 +107,7 @@ def revenue_forecast(data: dict) -> list[dict]:
     return out
 
 
-def _spend_kpis(data: dict, years: list[int]) -> list[dict]:
+def _spend_kpis(data: dict, years: list[int], lang: str) -> list[dict]:
     rev = {int(y): v for y, v in data["revenue"].items()}
     pur = {int(y): v for y, v in data["purchase"].items()}
     first, last = years[0], years[-1]
@@ -114,13 +115,13 @@ def _spend_kpis(data: dict, years: list[int]) -> list[dict]:
     kpis = [
         {
             "id": "customer_share",
-            "label": "Customer-Share",
-            "group": "Abhängigkeit",
+            "label": t(lang, "kpi.customer_share"),
+            "group": "dependency",
             "value": round(share * 100, 1),
             "unit": "%",
             "status": _status_high_is_bad(share, "customer_share"),
-            "formula": f"Einkaufsvolumen {last} / Lieferantenumsatz {last} = {pur[last]:.2f} / {rev[last]:.2f} Mio. €",
-            "threshold": "Warnung ≥ 30 %, kritisch ≥ 50 %",
+            "formula": t(lang, "kpi.customer_share.formula", last=last, pur=pur[last], rev=rev[last]),
+            "threshold": t(lang, "kpi.customer_share.threshold"),
             "source": "Spend Cube",
         }
     ]
@@ -131,13 +132,13 @@ def _spend_kpis(data: dict, years: list[int]) -> list[dict]:
     kpis.append(
         {
             "id": "customer_share_delta",
-            "label": f"Veränderung Customer-Share seit {ref}",
-            "group": "Abhängigkeit",
+            "label": t(lang, "kpi.customer_share_delta", ref=ref),
+            "group": "dependency",
             "value": round(delta_pp, 1),
             "unit": "pp",
             "status": _status_high_is_bad(delta_pp, "customer_share_delta_pp"),
-            "formula": f"Customer-Share {last} − Customer-Share {ref}",
-            "threshold": "Warnung ≥ +5 pp, kritisch ≥ +10 pp",
+            "formula": t(lang, "kpi.customer_share_delta.formula", last=last, ref=ref),
+            "threshold": t(lang, "kpi.customer_share_delta.threshold"),
             "source": "Spend Cube",
         }
     )
@@ -145,20 +146,20 @@ def _spend_kpis(data: dict, years: list[int]) -> list[dict]:
     kpis.append(
         {
             "id": "revenue_cagr",
-            "label": f"Umsatz-CAGR {first}–{last}",
-            "group": "Umsatz",
+            "label": t(lang, "kpi.revenue_cagr", first=first, last=last),
+            "group": "revenue",
             "value": round(cagr * 100, 1),
             "unit": "%",
             "status": "ok" if cagr >= 0 else ("warn" if cagr > -0.05 else "critical"),
             "formula": f"({rev[last]:.2f} / {rev[first]:.2f})^(1/{last - first}) − 1",
-            "threshold": "Warnung < 0 %, kritisch ≤ −5 % p.a.",
+            "threshold": t(lang, "kpi.revenue_cagr.threshold"),
             "source": "Spend Cube",
         }
     )
     return kpis
 
 
-def _plan_kpis(data: dict, years: list[int], forecast: list[dict]) -> list[dict]:
+def _plan_kpis(data: dict, years: list[int], forecast: list[dict], lang: str) -> list[dict]:
     snapshots = data.get("plan_snapshots") or []
     if not snapshots or not years:
         return []
@@ -171,16 +172,13 @@ def _plan_kpis(data: dict, years: list[int], forecast: list[dict]) -> list[dict]
         kpis.append(
             {
                 "id": "revenue_forecast",
-                "label": f"Umsatzprognose {forecast[0]['year']}",
-                "group": "Umsatz",
+                "label": t(lang, "kpi.revenue_forecast", year=forecast[0]["year"]),
+                "group": "revenue",
                 "value": round(fc_change * 100, 2),
                 "unit": "%",
                 "status": _status_low_is_bad(fc_change, "revenue_forecast_change"),
-                "formula": (
-                    f"Planvolumen {forecast[0]['year']} + fortgeschriebenes Fremdgeschäft "
-                    f"= {forecast[0]['revenue']:.2f} Mio. € vs. {rev_last:.2f} Mio. €"
-                ),
-                "threshold": "Warnung ≤ −5 %, kritisch ≤ −10 %",
+                "formula": t(lang, "kpi.revenue_forecast.formula", year=forecast[0]["year"], fc=forecast[0]["revenue"], rev=rev_last),
+                "threshold": t(lang, "kpi.revenue_forecast.threshold"),
                 "source": "Spend Cube + Demand Planning",
             }
         )
@@ -191,13 +189,13 @@ def _plan_kpis(data: dict, years: list[int], forecast: list[dict]) -> list[dict]
         kpis.append(
             {
                 "id": "plan_change",
-                "label": f"Geplantes Einkaufsvolumen {next_year}",
-                "group": "Planung",
+                "label": t(lang, "kpi.plan_change", year=next_year),
+                "group": "planning",
                 "value": round(plan_change * 100, 1),
                 "unit": "%",
                 "status": _status_low_is_bad(plan_change, "plan_change_next"),
-                "formula": f"Plan {next_year} / Ist {last} − 1 = {plan_next:.2f} / {pur_last:.2f}",
-                "threshold": "Warnung ≤ −8 %, kritisch ≤ −15 %",
+                "formula": t(lang, "kpi.plan_change.formula", year=next_year, last=last, plan=plan_next, pur=pur_last),
+                "threshold": t(lang, "kpi.plan_change.threshold"),
                 "source": "Demand Planning",
             }
         )
@@ -207,33 +205,33 @@ def _plan_kpis(data: dict, years: list[int], forecast: list[dict]) -> list[dict]
         kpis.append(
             {
                 "id": "plan_volatility",
-                "label": f"Volatilität Planvolumen {next_year}",
-                "group": "Planung",
+                "label": t(lang, "kpi.plan_volatility", year=next_year),
+                "group": "planning",
                 "value": round(vol * 100, 1),
                 "unit": "%",
                 "status": _status_high_is_bad(vol, "plan_volatility"),
-                "formula": f"Variationskoeffizient über {len(revisions)} Planstände",
-                "threshold": "Warnung ≥ 8 %, kritisch ≥ 15 %",
+                "formula": t(lang, "kpi.plan_volatility.formula", n=len(revisions)),
+                "threshold": t(lang, "kpi.plan_volatility.threshold"),
                 "source": "Demand Planning",
             }
         )
     return kpis
 
 
-def _rating_kpis(pd_hist: list[dict], as_of: str) -> list[dict]:
+def _rating_kpis(pd_hist: list[dict], as_of: str, lang: str) -> list[dict]:
     if not pd_hist:
         return []
     pd_latest = pd_hist[-1]
     kpis = [
         {
             "id": "pd_latest",
-            "label": "Coface-Ausfallwahrscheinlichkeit (PD)",
-            "group": "Rating",
+            "label": t(lang, "kpi.pd_latest"),
+            "group": "rating",
             "value": pd_latest["pd"],
             "unit": "%",
             "status": _status_high_is_bad(pd_latest["pd"], "pd_latest"),
-            "formula": f"Letzter Ratingstand vom {pd_latest['date']}",
-            "threshold": "Gelb ≥ 1 %, rot ≥ 3 %",
+            "formula": t(lang, "kpi.pd_latest.formula", date=pd_latest["date"]),
+            "threshold": t(lang, "kpi.pd_latest.threshold"),
             "source": "Risk Management (Coface)",
         }
     ]
@@ -245,13 +243,13 @@ def _rating_kpis(pd_hist: list[dict], as_of: str) -> list[dict]:
     kpis.append(
         {
             "id": "pd_trend",
-            "label": f"PD-Trend seit {base['date'][:7]}",
-            "group": "Rating",
+            "label": t(lang, "kpi.pd_trend", date=base["date"][:7]),
+            "group": "rating",
             "value": round(pd_change, 2),
             "unit": "pp",
             "status": _status_high_is_bad(pd_change, "pd_change_pp"),
             "formula": f"{pd_latest['pd']} % − {base['pd']} %",
-            "threshold": "Warnung ≥ +0,5 pp, kritisch ≥ +1 pp",
+            "threshold": t(lang, "kpi.pd_trend.threshold"),
             "source": "Risk Management (Coface)",
         }
     )
@@ -259,20 +257,20 @@ def _rating_kpis(pd_hist: list[dict], as_of: str) -> list[dict]:
     kpis.append(
         {
             "id": "rating_gap",
-            "label": "Längste Lücke zwischen Ratingständen",
-            "group": "Rating",
+            "label": t(lang, "kpi.rating_gap"),
+            "group": "rating",
             "value": gap,
-            "unit": "Monate",
+            "unit": t(lang, "unit.months"),
             "status": _status_high_is_bad(gap, "rating_staleness_months"),
-            "formula": f"{len(window)} Ratingstände in 48 Monaten",
-            "threshold": "Warnung ≥ 12 Monate, kritisch ≥ 24 Monate",
+            "formula": t(lang, "kpi.rating_gap.formula", n=len(window)),
+            "threshold": t(lang, "kpi.rating_gap.threshold"),
             "source": "Risk Management (Coface)",
         }
     )
     return kpis
 
 
-def _quality_kpis(quality: dict) -> list[dict]:
+def _quality_kpis(quality: dict, lang: str) -> list[dict]:
     q = {int(y): v for y, v in quality.items()}
     qy = sorted(q)
     if not qy:
@@ -285,13 +283,13 @@ def _quality_kpis(quality: dict) -> list[dict]:
         kpis.append(
             {
                 "id": "ppm",
-                "label": "Reklamationsquote (ppm)",
-                "group": "Qualität",
+                "label": t(lang, "kpi.ppm"),
+                "group": "quality",
                 "value": latest["ppm"],
                 "unit": "ppm",
                 "status": _status_high_is_bad(ppm_change, "ppm_change"),
-                "formula": f"Veränderung ggü. Ø Vorjahre: {ppm_change * 100:+.0f} %" if prev else "Keine Vorjahreswerte",
-                "threshold": "Warnung ≥ +25 %, kritisch ≥ +60 % ggü. Vorjahren",
+                "formula": t(lang, "kpi.ppm.formula", change=ppm_change * 100) if prev else t(lang, "kpi.ppm.no_history"),
+                "threshold": t(lang, "kpi.ppm.threshold"),
                 "source": "Quality Management",
             }
         )
@@ -299,20 +297,20 @@ def _quality_kpis(quality: dict) -> list[dict]:
         kpis.append(
             {
                 "id": "otd",
-                "label": "Liefertreue",
-                "group": "Qualität",
+                "label": t(lang, "kpi.otd"),
+                "group": "quality",
                 "value": round(latest["otd"] * 100, 1),
                 "unit": "%",
                 "status": _status_low_is_bad(latest["otd"], "otd_latest"),
-                "formula": f"Pünktliche Lieferungen {qy[-1]}",
-                "threshold": "Warnung ≤ 95 %, kritisch ≤ 90 %",
+                "formula": t(lang, "kpi.otd.formula", year=qy[-1]),
+                "threshold": t(lang, "kpi.otd.threshold"),
                 "source": "Quality Management",
             }
         )
     return kpis
 
 
-def compute_kpis(data: dict) -> dict:
+def compute_kpis(data: dict, lang: str = "de") -> dict:
     as_of = data.get("as_of") or ""
     years = _spend_years(data)
     pd_hist = sorted(data.get("pd_history") or [], key=lambda p: p["date"])
@@ -323,10 +321,10 @@ def compute_kpis(data: dict) -> dict:
     forecast = revenue_forecast(data)
 
     kpis = (
-        (_spend_kpis(data, years) if years else [])
-        + _plan_kpis(data, years, forecast)
-        + _rating_kpis(pd_hist, as_of)
-        + _quality_kpis(data.get("quality") or {})
+        (_spend_kpis(data, years, lang) if years else [])
+        + _plan_kpis(data, years, forecast, lang)
+        + _rating_kpis(pd_hist, as_of, lang)
+        + _quality_kpis(data.get("quality") or {}, lang)
     )
     available = {k["source"].split(" + ")[0] for k in kpis} | {
         "Demand Planning" for k in kpis if "Demand Planning" in k["source"]
@@ -360,38 +358,36 @@ class RiskCheck(BaseModel):
 
 
 SYSTEM_RISK = (
-    "Du bist der AI Agent 'Internal Data' eines Frühwarnsystems für finanziell kritische Lieferanten im "
-    "Automotive-Einkauf. Du erhältst die aus internen Systemen berechneten Kennzahlen eines Lieferanten mit "
-    "Formel, Schwelle und Quelle. Entscheide, ob Hinweise auf ein finanzielles Risiko vorliegen (risk = true), "
-    "sodass der Lieferant im Decision Module vertieft analysiert wird, oder ob er erst im nächsten Quartal "
-    "erneut bewertet wird (risk = false). Begründe kurz und sachlich auf Deutsch mit den konkreten Kennzahlen. "
-    "Erfinde keine Werte und vergib keinen Score."
+    "You are the AI agent 'Internal Data' of an early-warning system for financially critical suppliers in "
+    "automotive purchasing. You receive a supplier's key figures computed from internal systems, each with "
+    "formula, threshold and source. Decide whether there are signs of a financial risk (risk = true), so that the "
+    "supplier is analysed in depth in the Decision Module, or whether it is re-evaluated next quarter "
+    "(risk = false). Give a short, factual reasoning that cites the specific key figures. Do not invent values "
+    "and do not assign a score."
 )
 
 
-def rule_risk_check(kpis: list[dict]) -> RiskCheck:
+def rule_risk_check(kpis: list[dict], lang: str = "de") -> RiskCheck:
     flagged = [k for k in kpis if k["status"] != "ok"]
     if not kpis:
-        return RiskCheck(risk=False, reasoning="Keine internen Kennzahlen vorhanden – Neubewertung im nächsten Quartal.")
+        return RiskCheck(risk=False, reasoning=t(lang, "risk.no_kpis"))
     if not flagged:
-        return RiskCheck(
-            risk=False,
-            reasoning="Alle Kennzahlen liegen innerhalb ihrer Schwellen – Neubewertung im nächsten Quartal.",
-        )
-    listed = "; ".join(f"{k['label']} {k['value']} {k['unit']} (Schwelle: {k['threshold']})" for k in flagged[:5])
-    return RiskCheck(risk=True, reasoning=f"{len(flagged)} Kennzahl(en) über ihrer Schwelle: {listed}.")
+        return RiskCheck(risk=False, reasoning=t(lang, "risk.all_ok"))
+    listed = "; ".join(
+        t(lang, "risk.item", label=k["label"], value=k["value"], unit=k["unit"], threshold=k["threshold"]) for k in flagged[:5]
+    )
+    return RiskCheck(risk=True, reasoning=t(lang, "risk.flagged", n=len(flagged), listed=listed))
 
 
-def risk_check(master: dict, kpis: list[dict], llm: LLM) -> tuple[RiskCheck, str]:
+def risk_check(master: dict, kpis: list[dict], llm: LLM, lang: str = "de") -> tuple[RiskCheck, str]:
     """The Internal Module's AI agent decides whether the supplier goes into the Decision Module."""
     if not kpis:
-        return rule_risk_check(kpis), "Regelbasiert"
+        return rule_risk_check(kpis, lang), t(lang, "method.rules")
     try:
         listing = "\n".join(
-            f"- {k['label']}: {k['value']} {k['unit']} – {k['formula']} (Schwelle: {k['threshold']}; Quelle: {k['source']})"
-            for k in kpis
+            f"- {k['label']}: {k['value']} {k['unit']} – {k['formula']} ({k['threshold']}; {k['source']})" for k in kpis
         )
-        prompt = f"Lieferant: {master['name']} ({master['commodity']}).\n\nKennzahlen:\n{listing}"
+        prompt = f"{t(lang, 'language')}\n\nSupplier: {master['name']} ({master['commodity']}).\n\nKey figures:\n{listing}"
         return llm.structured(SYSTEM_RISK, prompt, RiskCheck), llm.label
     except LLMUnavailable:
-        return rule_risk_check(kpis), "Regelbasiert"
+        return rule_risk_check(kpis, lang), t(lang, "method.rules")

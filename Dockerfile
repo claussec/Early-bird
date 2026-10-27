@@ -12,6 +12,7 @@ WORKDIR /app
 COPY backend/requirements.txt backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt
 COPY backend/ backend/
+COPY data/ data/
 COPY --from=frontend /app/frontend/dist frontend/dist
 ENV DB_PATH=/data/risk.db
 VOLUME /data

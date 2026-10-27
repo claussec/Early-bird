@@ -2,7 +2,7 @@
 
 import random
 
-from . import db
+from . import db, geo
 
 COMMODITIES = [
     "Metall & Umformung",
@@ -19,25 +19,54 @@ BUYERS = [
     {"name": "Marco Ferri", "email": "m.ferri@example.com"},
 ]
 
-# name, city, country, commodity, profile
-SUPPLIERS = [
-    ("Kessler Umformtechnik GmbH", "Pforzheim", "DE", 0, "healthy"),
-    ("Brandt Präzisionsguss GmbH", "Aalen", "DE", 0, "dependency"),
-    ("Vogtland Stanztechnik GmbH", "Plauen", "DE", 0, "critical"),
-    ("Moravia Forge s.r.o.", "Brno", "CZ", 0, "recovering"),
-    ("NordElektra Components AG", "Kiel", "DE", 1, "healthy"),
-    ("Silesia Cable Systems Sp. z o.o.", "Katowice", "PL", 1, "declining"),
-    ("Alpen Sensorik GmbH", "Graz", "AT", 1, "hidden"),
-    ("Lombarda Elettronica S.p.A.", "Bergamo", "IT", 1, "quality"),
-    ("Rheinpolymer GmbH", "Ludwigshafen", "DE", 2, "declining"),
-    ("Danubia Plastics Kft.", "Győr", "HU", 2, "healthy"),
-    ("Iberflex Sellados S.L.", "Zaragoza", "ES", 2, "dependency"),
-    ("Hohenlohe Antriebstechnik GmbH", "Künzelsau", "DE", 3, "healthy"),
-    ("Carpathia Gears S.R.L.", "Sibiu", "RO", 3, "critical"),
-    ("Saxonia Lager & Wellen GmbH", "Chemnitz", "DE", 3, "recovering"),
-    ("Neckar Galvanik GmbH", "Heilbronn", "DE", 4, "hidden"),
-    ("Bohemia Coatings a.s.", "Pilsen", "CZ", 4, "quality"),
+# Plants of the (fictitious) buying organization; their contacts are warned about linked suppliers.
+PLANTS = [
+    {
+        "id": "P01", "name": "Werk Pforzheim (Demo)", "street": "Musterstraße 1", "zip": "75172",
+        "city": "Pforzheim", "country": "DE",
+        "contacts": [
+            {"name": "Anna Keller", "email": "a.keller@example.com", "role": "Werkleitung"},
+            {"name": "Lukas Wenzel", "email": "l.wenzel@example.com", "role": "Disposition"},
+        ],
+    },
+    {
+        "id": "P02", "name": "Werk Leipzig (Demo)", "street": "Beispielweg 7", "zip": "04103",
+        "city": "Leipzig", "country": "DE",
+        "contacts": [
+            {"name": "Miriam Schulz", "email": "m.schulz@example.com", "role": "Werkleitung"},
+            {"name": "Julia Hartmann", "email": "j.hartmann@example.com", "role": "Einkauf"},
+        ],
+    },
+    {
+        "id": "P03", "name": "Werk Kecskemét (Demo)", "street": "Példa utca 3", "zip": "6000",
+        "city": "Kecskemét", "country": "HU",
+        "contacts": [
+            {"name": "Bence Varga", "email": "b.varga@example.com", "role": "Plant manager"},
+        ],
+    },
 ]
+
+# name, street, zip, city, country, commodity, profile, linked plants.
+# All companies and addresses are invented; "(Demo)" makes this visible everywhere.
+SUPPLIERS = [
+    ("Kessler Umformtechnik GmbH", "Industriestraße 12", "75179", "Pforzheim", "DE", 0, "healthy", ["P01"]),
+    ("Brandt Präzisionsguss GmbH", "Am Gießereiweg 4", "73431", "Aalen", "DE", 0, "dependency", ["P01", "P02"]),
+    ("Vogtland Stanztechnik GmbH", "Gewerbering 8", "08523", "Plauen", "DE", 0, "critical", ["P02", "P03"]),
+    ("Moravia Forge s.r.o.", "Průmyslová 21", "61200", "Brno", "CZ", 0, "recovering", ["P03"]),
+    ("NordElektra Components AG", "Hafenkai 3", "24103", "Kiel", "DE", 1, "healthy", ["P02"]),
+    ("Silesia Cable Systems Sp. z o.o.", "ul. Przemysłowa 5", "40-020", "Katowice", "PL", 1, "declining", ["P02", "P03"]),
+    ("Alpen Sensorik GmbH", "Technologiepark 2", "8020", "Graz", "AT", 1, "hidden", ["P01"]),
+    ("Lombarda Elettronica S.p.A.", "Via dell'Industria 9", "24126", "Bergamo", "IT", 1, "quality", ["P01"]),
+    ("Rheinpolymer GmbH", "Chemiestraße 15", "67059", "Ludwigshafen", "DE", 2, "declining", ["P01", "P02"]),
+    ("Danubia Plastics Kft.", "Ipari út 14", "9027", "Győr", "HU", 2, "healthy", ["P03"]),
+    ("Iberflex Sellados S.L.", "Calle Industria 22", "50014", "Zaragoza", "ES", 2, "dependency", ["P01"]),
+    ("Hohenlohe Antriebstechnik GmbH", "Getriebeweg 6", "74653", "Künzelsau", "DE", 3, "healthy", ["P01"]),
+    ("Carpathia Gears S.R.L.", "Strada Fabricii 10", "550018", "Sibiu", "RO", 3, "critical", ["P03"]),
+    ("Saxonia Lager & Wellen GmbH", "Lagerstraße 11", "09111", "Chemnitz", "DE", 3, "recovering", ["P02"]),
+    ("Neckar Galvanik GmbH", "Uferstraße 30", "74072", "Heilbronn", "DE", 4, "hidden", ["P01"]),
+    ("Bohemia Coatings a.s.", "Tovární 7", "30100", "Pilsen", "CZ", 4, "quality", ["P02", "P03"]),
+]
+DEMO_SUFFIX = " (Demo)"
 
 PROFILES = {
     # rev_growth, share_start, share_end, pd_path, plan_next_change, plan_noise, ppm_path, otd
@@ -96,7 +125,9 @@ def _interp(path: list[float], t: float) -> float:
     return path[i] + (path[i + 1] - path[i]) * (x - i)
 
 
-def _build_regular(idx: int, name: str, city: str, country: str, commodity: int, profile: str) -> tuple:
+def _build_regular(
+    idx: int, name: str, street: str, zip_code: str, city: str, country: str, commodity: int, profile: str, plants: list[str]
+) -> tuple:
     rnd = random.Random(idx * 7919)
     p = PROFILES[profile]
     years = list(range(2020, 2026))
@@ -134,7 +165,9 @@ def _build_regular(idx: int, name: str, city: str, country: str, commodity: int,
     master = {
         "id": f"S{1000 + idx}",
         "number": f"LF-{40210 + idx * 37}",
-        "name": name,
+        "name": name + DEMO_SUFFIX,
+        "street": street,
+        "zip": zip_code,
         "city": city,
         "country": country,
         "website": f"https://www.{_slug(name)}.example",
@@ -142,7 +175,9 @@ def _build_regular(idx: int, name: str, city: str, country: str, commodity: int,
         "buyer": BUYERS[idx % len(BUYERS)],
         "register_status": register,
         "source": "demo",
+        "plant_ids": plants,
     }
+    master["location"] = geo.locate(master)
     internal = {
         "as_of": f"{last}-12",
         "revenue": revenue,
@@ -164,7 +199,16 @@ def _build_regular(idx: int, name: str, city: str, country: str, commodity: int,
     return master, internal, external
 
 
+def demo_plants() -> list[dict]:
+    return [{**p, "location": geo.locate(p)} for p in PLANTS]
+
+
+def demo_suppliers() -> list[tuple]:
+    return [_build_regular(i, *row) for i, row in enumerate(SUPPLIERS)]
+
+
 def seed() -> None:
-    for i, (name, city, country, commodity, profile) in enumerate(SUPPLIERS):
-        master, internal, external = _build_regular(i, name, city, country, commodity, profile)
+    for plant in demo_plants():
+        db.upsert_plant(plant)
+    for master, internal, external in demo_suppliers():
         db.upsert_supplier(master, internal, external)

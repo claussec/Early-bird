@@ -15,7 +15,8 @@ from html import escape
 import httpx
 
 from ..config import settings
-from .base import Notifier, NotifierError, RiskMessage
+from ..i18n import t
+from .base import Notifier, NotifierError, Recipient, RiskMessage
 
 GRAPH = "https://graph.microsoft.com/v1.0"
 
@@ -45,33 +46,37 @@ def graph_token() -> str:
     return _token["value"]
 
 
-def render_html(m: RiskMessage) -> str:
+def render_html(m: RiskMessage, recipient: Recipient) -> str:
+    lang = m.lang
     measures = "".join(f"<li>{escape(x)}</li>" for x in m.measures)
+    plants = f"<p>{escape(t(lang, 'mail.plants', plants=', '.join(m.plants)))}</p>" if m.plants else ""
+    intro = t(lang, "mail.intro", name=escape(m.supplier_name), number=escape(m.supplier_number))
     return f"""
 <div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1b1b1b">
-  <p>Hallo {escape(m.recipient_name)},</p>
-  <p>das Frühwarnsystem hat beim Lieferanten <b>{escape(m.supplier_name)}</b> ({escape(m.supplier_number)})
-     ein finanzielles Risiko erkannt und den Fall an dich eskaliert.</p>
+  <p>{escape(t(lang, "mail.greeting", name=recipient.name or recipient.email))}</p>
+  <p>{intro}</p>
+  {plants}
   <p>{escape(m.summary)}</p>
-  <p><b>Empfehlung:</b> {escape(m.recommendation)}</p>
-  <p><b>Maßnahmen:</b></p><ul>{measures}</ul>
-  <p><a href="{escape(m.link)}">Bewertung im Supplier Risk Radar öffnen</a></p>
+  <p><b>{t(lang, "mail.recommendation")}:</b> {escape(m.recommendation)}</p>
+  <p><b>{t(lang, "mail.measures")}:</b></p><ul>{measures}</ul>
+  <p><a href="{escape(m.link)}">{t(lang, "mail.open")}</a></p>
 </div>"""
 
 
 class OutlookNotifier(Notifier):
     id = "outlook"
     name = "Outlook (Microsoft Graph)"
+    per_recipient = True
 
     @property
     def configured(self) -> bool:
         return bool(settings.ms_tenant_id and settings.ms_client_id and settings.ms_client_secret and settings.outlook_sender)
 
-    def send(self, message: RiskMessage) -> None:
+    def send(self, message: RiskMessage, recipient: Recipient | None = None) -> None:
         if not self.configured:
             raise NotifierError("Outlook ist nicht konfiguriert")
-        if not message.recipient_email:
-            raise NotifierError("Keine E-Mail-Adresse des Einkäufers hinterlegt")
+        if recipient is None or not recipient.email:
+            raise NotifierError("Keine E-Mail-Adresse hinterlegt")
         try:
             r = httpx.post(
                 f"{GRAPH}/users/{settings.outlook_sender}/sendMail",
@@ -79,8 +84,8 @@ class OutlookNotifier(Notifier):
                 json={
                     "message": {
                         "subject": message.subject,
-                        "body": {"contentType": "HTML", "content": render_html(message)},
-                        "toRecipients": [{"emailAddress": {"address": message.recipient_email, "name": message.recipient_name}}],
+                        "body": {"contentType": "HTML", "content": render_html(message, recipient)},
+                        "toRecipients": [{"emailAddress": {"address": recipient.email, "name": recipient.name}}],
                         "importance": "high",
                     },
                     "saveToSentItems": True,

@@ -1,6 +1,6 @@
 """Stores the message in the cockpit (bell icon). Always available."""
 
-from .base import Notifier, RiskMessage
+from .base import Notifier, Recipient, RiskMessage
 
 
 class InAppNotifier(Notifier):
@@ -11,6 +11,6 @@ class InAppNotifier(Notifier):
     def configured(self) -> bool:
         return True
 
-    def send(self, message: RiskMessage) -> None:
+    def send(self, message: RiskMessage, recipient: Recipient | None = None) -> None:
         # Persisting is done by the dispatcher for every channel; nothing else to deliver.
         return None

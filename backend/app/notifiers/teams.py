@@ -8,7 +8,8 @@ in the card; channel members can follow up there.
 import httpx
 
 from ..config import settings
-from .base import Notifier, NotifierError, RiskMessage
+from ..i18n import t
+from .base import Notifier, NotifierError, Recipient, RiskMessage
 
 
 
@@ -20,7 +21,7 @@ def adaptive_card(m: RiskMessage) -> dict:
         "body": [
             {
                 "type": "TextBlock",
-                "text": f"Frühwarnung: {m.supplier_name}",
+                "text": t(m.lang, "teams.title", name=m.supplier_name),
                 "weight": "Bolder",
                 "size": "Medium",
                 "color": "attention",
@@ -29,15 +30,16 @@ def adaptive_card(m: RiskMessage) -> dict:
             {
                 "type": "FactSet",
                 "facts": [
-                    {"title": "Lieferantennr.", "value": m.supplier_number},
-                    {"title": "Einkäufer", "value": f"{m.recipient_name} ({m.recipient_email})"},
+                    {"title": t(m.lang, "teams.number"), "value": m.supplier_number},
+                    *([{"title": t(m.lang, "teams.plants"), "value": ", ".join(m.plants)}] if m.plants else []),
+                    {"title": t(m.lang, "teams.recipients"), "value": ", ".join(r.display for r in m.recipients)},
                 ],
             },
             {"type": "TextBlock", "text": m.summary, "wrap": True},
-            {"type": "TextBlock", "text": f"**Empfehlung:** {m.recommendation}", "wrap": True},
+            {"type": "TextBlock", "text": f"**{t(m.lang, 'mail.recommendation')}:** {m.recommendation}", "wrap": True},
             {"type": "TextBlock", "text": "\n".join(f"- {x}" for x in m.measures), "wrap": True},
         ],
-        "actions": [{"type": "Action.OpenUrl", "title": "Im Supplier Risk Radar öffnen", "url": m.link}],
+        "actions": [{"type": "Action.OpenUrl", "title": t(m.lang, "mail.open"), "url": m.link}],
     }
 
 
@@ -49,7 +51,7 @@ class TeamsNotifier(Notifier):
     def configured(self) -> bool:
         return bool(settings.teams_webhook_url)
 
-    def send(self, message: RiskMessage) -> None:
+    def send(self, message: RiskMessage, recipient: Recipient | None = None) -> None:
         if not self.configured:
             raise NotifierError("Teams ist nicht konfiguriert")
         try:

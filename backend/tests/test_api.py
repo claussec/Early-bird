@@ -110,14 +110,14 @@ def test_automode_settings_and_run(client, monkeypatch):
     client.post("/api/suppliers", json={**SUPPLIER, "figures": {"pd_current": 4.5, "pd_previous": 1.0}})
     sent = []
     monkeypatch.setattr(TeamsNotifier, "configured", property(lambda self: True))
-    monkeypatch.setattr(TeamsNotifier, "send", lambda self, m: sent.append(m))
+    monkeypatch.setattr(TeamsNotifier, "send", lambda self, m, r=None: sent.append(m))
 
     summary = automode.run_once()
     assert summary["suppliers"] == 1
     assert summary["escalations"] == 1
     assert summary["sent"] == 1  # Teams
     assert summary["failed"] == 1  # Outlook not configured
-    assert sent[0].recipient_email == SUPPLIER["buyer_email"]
+    assert [r.email for r in sent[0].recipients] == [SUPPLIER["buyer_email"]]
 
     channels = {n["channel"]: n["status"] for n in client.get("/api/notifications").json()}
     assert channels == {"inapp": "sent", "teams": "sent", "outlook": "failed"}
@@ -126,7 +126,7 @@ def test_automode_settings_and_run(client, monkeypatch):
 
 def test_outlook_uses_graph_send_mail(monkeypatch):
     from app.notifiers import outlook
-    from app.notifiers.base import RiskMessage
+    from app.notifiers.base import Recipient, RiskMessage
 
     for key, value in {
         "ms_tenant_id": "tenant",
@@ -155,15 +155,88 @@ def test_outlook_uses_graph_send_mail(monkeypatch):
         return Resp(202)
 
     monkeypatch.setattr(outlook.httpx, "post", fake_post)
+    erika = Recipient(name="Erika", email="erika@example.com", role="buyer")
     outlook.OutlookNotifier().send(
         RiskMessage(
-            supplier_id="S1", supplier_name="X GmbH", supplier_number="1", recipient_name="Erika",
-            recipient_email="erika@example.com", traffic_light="red", score=80, subject="Test",
-            summary="s", recommendation="r", measures=["m"], link="http://x",
-        )
+            supplier_id="S1", supplier_name="X GmbH", supplier_number="1", recipients=[erika], plants=[],
+            lang="en", subject="Test", summary="s", recommendation="r", measures=["m"], link="http://x",
+        ),
+        erika,
     )
     assert calls[0][0] == "https://login.microsoftonline.com/tenant/oauth2/v2.0/token"
     url, kwargs = calls[1]
     assert url == "https://graph.microsoft.com/v1.0/users/risk-radar@example.com/sendMail"
     assert kwargs["headers"]["Authorization"] == "Bearer tok"
     assert kwargs["json"]["message"]["toRecipients"][0]["emailAddress"]["address"] == "erika@example.com"
+
+
+PLANT = {
+    "name": "Werk Nord",
+    "street": "Hafenstraße 1",
+    "zip": "20457",
+    "city": "Hamburg",
+    "country": "de",
+    "contacts": [
+        {"name": "Paul Nord", "email": "p.nord@example.com", "role": "Werkleitung"},
+        {"name": "Erika Muster", "email": "erika.muster@example.com", "role": "Einkauf"},
+    ],
+}
+
+
+def test_plants_crud_and_geocoding(client):
+    r = client.post("/api/plants", json=PLANT)
+    assert r.status_code == 201, r.text
+    plant = r.json()
+    assert plant["id"] == "P01"
+    assert plant["location"]["precision"] == "city"
+    assert abs(plant["location"]["lat"] - 53.55) < 0.2
+
+    moved = client.put(f"/api/plants/{plant['id']}", json={**PLANT, "lat": 10.0, "lon": 20.0}).json()
+    assert moved["location"] == {"lat": 10.0, "lon": 20.0, "precision": "manual", "source": "manual"}
+
+    s = client.post("/api/suppliers", json={**SUPPLIER, "street": "Weg 2", "plant_ids": ["P01"]}).json()
+    assert s["plant_ids"] == ["P01"]
+    assert client.get("/api/plants").json()[0]["supplier_ids"] == [s["id"]]
+    assert client.post("/api/suppliers", json={**SUPPLIER, "number": "2", "plant_ids": ["P99"]}).status_code == 400
+
+    assert client.delete("/api/plants/P01").status_code == 204
+    assert client.get(f"/api/suppliers/{s['id']}").json()["supplier"]["plant_ids"] == []
+
+
+def test_alert_reaches_all_contacts_of_linked_plants(client, monkeypatch):
+    from app import config as cfg
+    from app.notifiers import outlook
+
+    client.post("/api/plants", json=PLANT)
+    client.post("/api/plants", json={**PLANT, "name": "Werk Süd", "city": "München", "contacts": [
+        {"name": "Sara Süd", "email": "s.sued@example.com", "role": "Disposition"},
+    ]})
+    for key in ("ms_tenant_id", "ms_client_id", "ms_client_secret", "outlook_sender"):
+        monkeypatch.setattr(cfg.settings, key, "x@example.com")
+    mails = []
+    monkeypatch.setattr(outlook, "graph_token", lambda: "tok")
+    monkeypatch.setattr(
+        outlook.httpx, "post",
+        lambda url, **kw: mails.append(kw["json"]) or type("R", (), {"status_code": 202, "text": ""})(),
+    )
+    client.put("/api/automode", json={"channels": ["outlook"], "lang": "en"})
+    client.post(
+        "/api/suppliers",
+        json={**SUPPLIER, "plant_ids": ["P01", "P02"], "figures": {"pd_current": 4.5, "pd_previous": 1.0}},
+    )
+    from app import automode
+
+    automode.run_once()
+    to = [m["message"]["toRecipients"][0]["emailAddress"]["address"] for m in mails]
+    # buyer once (also a plant contact), plus every other plant contact
+    assert sorted(to) == ["erika.muster@example.com", "p.nord@example.com", "s.sued@example.com"]
+    assert mails[0]["message"]["subject"].startswith("[Early warning]")
+    assert "Werk Nord" in mails[0]["message"]["body"]["content"]
+
+
+def test_language_of_generated_texts(client):
+    en = client.post("/api/suppliers?lang=en", json={**SUPPLIER, "figures": {"pd_current": 4.5, "pd_previous": 1.0}}).json()
+    report = client.get(f"/api/suppliers/{en['id']}").json()["report"]
+    assert report["lang"] == "en"
+    assert report["decision"]["justification"].startswith("Escalation")
+    assert "Eskalation" not in report["argumentation"]["summary"]

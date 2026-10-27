@@ -13,7 +13,7 @@ import logging
 import threading
 from datetime import datetime, timedelta, timezone
 
-from . import db, pipeline
+from . import db, geo, pipeline
 from .config import settings
 from .connectors import ConnectorError, get_connector
 from .llm import LLM
@@ -35,10 +35,12 @@ def get_state() -> dict:
             "enabled": settings.automode_enabled,
             "interval_minutes": settings.automode_interval_minutes,
             "channels": settings.automode_channels,
+            "lang": settings.default_lang,
             "last_run": None,
             "next_run": None,
             "last_result": None,
         }
+    state.setdefault("lang", settings.default_lang)
     state["running"] = _lock.locked()
     return state
 
@@ -66,9 +68,11 @@ def refresh_from_source(master: dict) -> str | None:
         if record is None:
             return f"{master['number']} in {connector.name} nicht gefunden"
         updated = {**master, "name": record.name or master["name"]}
-        for field in ("city", "country", "website", "commodity"):
-            if getattr(record, field):
+        for field in ("street", "zip", "city", "country", "website", "commodity"):
+            if getattr(record, field, None):
                 updated[field] = getattr(record, field)
+        if any(updated.get(f) != master.get(f) for f in ("street", "zip", "city", "country")):
+            updated["location"] = geo.locate(updated)
         db.upsert_master(updated)
         data = connector.get_internal_data(master["number"])
         if data:
@@ -95,7 +99,7 @@ def run_once(llm: LLM | None = None) -> dict:
             note = refresh_from_source(master)
             if note:
                 summary["source_notes"].append(note)
-            report = pipeline.run_to_completion(master["id"], llm, channels)
+            report = pipeline.run_to_completion(master["id"], llm, channels, lang=state["lang"])
             summary["suppliers"] += 1
             if report["decision"]["escalate"]:
                 summary["escalations"] += 1

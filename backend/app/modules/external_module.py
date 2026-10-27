@@ -20,6 +20,7 @@ import httpx
 from pydantic import BaseModel
 
 from ..config import settings
+from ..i18n import t
 from ..llm import LLM, LLMUnavailable
 
 CATEGORIES = ["Finanzen", "Personal", "Management", "Markt", "Produktion", "ESG", "Presse"]
@@ -49,11 +50,11 @@ class Classifications(BaseModel):
 
 
 SYSTEM = (
-    "Du bist der AI Agent 'External Data' eines Frühwarnsystems für finanziell kritische Lieferanten "
-    "im Automotive-Einkauf. Du klassifizierst Web-Dokumente über einen Lieferanten. Für jedes Dokument: "
-    f"Kategorie ({', '.join(CATEGORIES)}), Signal (risk = Hinweis auf finanzielle Instabilität, success = Hinweis "
-    "auf Stabilität, neutral), Schwere 1–3 (3 = unmittelbar insolvenzrelevant) und eine kurze, sachliche "
-    "Begründung auf Deutsch. Bewerte nur, was im Dokument steht; spekuliere nicht."
+    "You are the AI agent 'External Data' of an early-warning system for financially critical suppliers in "
+    "automotive purchasing. You classify web documents about a supplier. For every document give: category "
+    f"(exactly one of {', '.join(CATEGORIES)}), signal (risk = sign of financial instability, success = sign of "
+    "stability, neutral), severity 1–3 (3 = immediately relevant to insolvency) and a short, factual rationale. "
+    "Judge only what the document says; do not speculate."
 )
 
 
@@ -135,22 +136,22 @@ def search_news(name: str, max_items: int = 10) -> list[dict]:
     return docs
 
 
-def collect(master: dict, stored: list[dict]) -> tuple[list[dict], str]:
+def collect(master: dict, stored: list[dict], lang: str = "de") -> tuple[list[dict], str]:
     """Returns the documents to analyze and a description of where they came from."""
     if settings.crawler_enabled:
         docs = crawl_website(master.get("website", "")) + search_news(master["name"])
         if docs:
-            return docs, f"Live-Crawling: {len(docs)} Dokumente (Website + News)"
-        return stored, "Live-Crawling ohne Treffer – gespeicherte Dokumente verwendet"
+            return docs, t(lang, "ext.live", n=len(docs))
+        return stored, t(lang, "ext.live_empty")
     if not stored:
-        return [], "Keine Web-Dokumente (Crawler deaktiviert: CRAWLER_ENABLED=false)"
-    return stored, f"Gespeicherter Datenbestand: {len(stored)} Dokumente"
+        return [], t(lang, "ext.none")
+    return stored, t(lang, "ext.stored", n=len(stored))
 
 
 # --- Classification agent ---------------------------------------------------------------
 
 
-def _keyword_classify(i: int, doc: dict) -> DocClassification:
+def _keyword_classify(i: int, doc: dict, lang: str = "de") -> DocClassification:
     text = f"{doc.get('title', '')} {doc.get('text', '')}".lower()
     risk = [t for t in RISK_TERMS if t in text]
     success = [t for t in SUCCESS_TERMS if t in text]
@@ -159,19 +160,19 @@ def _keyword_classify(i: int, doc: dict) -> DocClassification:
         severe = any(t in text for t in ["insolvenz", "restrukturierung", "zahlungsverzug", "verzögerten zahlungen", "banken"])
         return DocClassification(
             index=i, category=category, signal="risk", severity=3 if severe else 2,
-            rationale=f"Risikobegriffe erkannt: {', '.join(risk)}",
+            rationale=t(lang, "ext.risk_terms", terms=", ".join(risk)),
         )
     if success:
         return DocClassification(
             index=i, category=category, signal="success", severity=1,
-            rationale=f"Erfolgsbegriffe erkannt: {', '.join(success)}",
+            rationale=t(lang, "ext.success_terms", terms=", ".join(success)),
         )
-    return DocClassification(index=i, category=category, signal="neutral", severity=1, rationale="Kein eindeutiges Signal")
+    return DocClassification(index=i, category=category, signal="neutral", severity=1, rationale=t(lang, "ext.no_signal"))
 
 
-def classify(master: dict, docs: list[dict], llm: LLM) -> tuple[list[dict], str]:
+def classify(master: dict, docs: list[dict], llm: LLM, lang: str = "de") -> tuple[list[dict], str]:
     if not docs:
-        return [], "keine Dokumente"
+        return [], t(lang, "ext.no_docs")
     method = llm.label
     try:
         listing = "\n".join(
@@ -180,15 +181,15 @@ def classify(master: dict, docs: list[dict], llm: LLM) -> tuple[list[dict], str]
         )
         result = llm.structured(
             SYSTEM,
-            f"Lieferant: {master['name']} ({master['city']}, {master['country']}), Warengruppe {master['commodity']}.\n\n"
-            f"Dokumente:\n{listing}\n\nKlassifiziere jedes Dokument (index = Nummer in eckigen Klammern).",
+            f"{t(lang, 'language')} (rationale)\n\nSupplier: {master['name']} ({master['city']}, {master['country']}), "
+            f"commodity {master['commodity']}.\n\nDocuments:\n{listing}\n\nClassify every document (index = number in square brackets).",
             Classifications,
         )
         by_index = {c.index: c for c in result.items}
-        classes = [by_index.get(i) or _keyword_classify(i, d) for i, d in enumerate(docs)]
+        classes = [by_index.get(i) or _keyword_classify(i, d, lang) for i, d in enumerate(docs)]
     except LLMUnavailable:
-        method = "Regelbasierte Schlagwort-Klassifikation"
-        classes = [_keyword_classify(i, d) for i, d in enumerate(docs)]
+        method = t(lang, "ext.keyword_method")
+        classes = [_keyword_classify(i, d, lang) for i, d in enumerate(docs)]
     out = []
     for d, c in zip(docs, classes):
         out.append({**{k: v for k, v in d.items() if k != "text"}, **c.model_dump(exclude={"index"})})

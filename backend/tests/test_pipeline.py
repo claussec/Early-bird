@@ -65,4 +65,18 @@ def test_quality_issues_alone_do_not_escalate():
     assert report["status"] == "risk"
     assert report["decision"]["escalate"] is False
     risks = [i for i in report["indicators"] if i["type"] == "risk"]
-    assert risks and all(i["priority"] == "operativ" for i in risks)
+    assert risks and all(i["priority"] == "operational" for i in risks)
+
+
+def test_demo_plants_and_recipients():
+    from app import db, pipeline
+
+    assert [p["id"] for p in db.list_plants()] == ["P01", "P02", "P03"]
+    master = db.get_supplier("S1002")  # linked to two plants
+    recipients, plants = pipeline.recipients_for(master)
+    assert len(plants) == 2
+    emails = [r.email for r in recipients]
+    assert len(emails) == len(set(emails))
+    assert master["buyer"]["email"] in emails
+    assert all(s["name"].endswith("(Demo)") for s in db.list_suppliers())
+    assert all(s["location"] for s in db.list_suppliers())
