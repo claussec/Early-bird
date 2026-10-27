@@ -1,125 +1,131 @@
 # Supplier Risk Radar
 
-**KI-Frühwarnsystem für finanziell kritische Lieferanten.** Es setzt das Referenzmodell aus diesem Paper als lauffähige Software um:
+**AI-based early-warning system for financially critical suppliers.** It turns the reference model from the following paper into working software:
 
-> Claussen, C.; Haas, F.; Schätter, F.: *Early Detection of Financially Critical Suppliers with Artificial Intelligence: A Design-Oriented Case Study in Automotive Purchasing.* Hochschule Pforzheim.
+> Claussen, C.; Haas, F.; Schätter, F.: *Early Detection of Financially Critical Suppliers with Artificial Intelligence: A Design-Oriented Case Study in Automotive Purchasing.* Pforzheim University.
 
-Ein Agentensystem bewertet alle hinterlegten Lieferanten. Es verknüpft interne Kennzahlen (Customer-Share, Umsatzentwicklung, Planvolumen, Coface-PD, Qualität) mit externen Web-Informationen. Wie im Paper entscheidet der Agent „Internal Data“ zuerst **„Risk?“**. Liegt ein Risiko vor, erzeugt das Decision Module eine **nachvollziehbare Argumentationskette** und entscheidet **„Escalation?“**, mit einer handlungsorientierten Empfehlung. Einen numerischen Score gibt es bewusst nicht. Bei einer Eskalation wird der verantwortliche Einkäufer benachrichtigt, im Automode auch per Outlook und Teams.
+An agent system evaluates every supplier on record. It combines internal indicators (customer share, revenue development, planned purchasing volumes, Coface probability of default, quality) with information from the web. As described in the paper, the *Internal Data* agent first decides **"Risk?"**. If a risk is present, the Decision Module builds a **traceable chain of argumentation** and decides **"Escalation?"**, together with an action-oriented recommendation. There is deliberately no numeric score. When a case is escalated, the responsible buyer is notified, in auto mode also via Outlook and Teams.
 
-Das 3D-Cockpit zeigt das Werk des Abnehmers in der Mitte und die Lieferanten als Gebäude ringsum, gruppiert nach Warengruppe. Du kannst nach Name oder Lieferantennummer suchen, filtern und neue Lieferanten direkt anlegen.
+The 3D cockpit shows the buying organisation's plant in the centre and the suppliers as buildings around it, grouped by commodity. Users can search by name or supplier number, filter the supplier base and add new suppliers directly.
+
+*The user interface is in German.*
 
 ![Cockpit](docs/cockpit.png)
 
-| Lieferant anlegen | Automode |
+| AI agents: workflow and decisions | Web research with Claude (online version) |
 |---|---|
-| ![Lieferant anlegen](docs/supplier-form.png) | ![Automode](docs/automode.png) |
+| ![AI agents](docs/agents.png) | ![Web research](docs/web-research.png) |
 
-## Zwei Varianten
+| Adding a supplier | Auto mode |
+|---|---|
+| ![Adding a supplier](docs/supplier-form.png) | ![Auto mode](docs/automode.png) |
 
-| | Server-Version | Online-Version (claude.ai-Artefakt) |
+## Two variants
+
+| | Server version | Online version (claude.ai artifact) |
 |---|---|---|
-| Start | `docker compose up` bzw. Python + Node | Link öffnen, keine Installation |
-| KI-Agenten | Claude-API, Ollama (offline) oder regelbasiert | Claude über das eigene claude.ai-Konto oder regelbasiert |
-| Web-Signale | Live-Crawling | Recherche-Prompt → Claude-Chat mit Websuche → Antwort einfügen |
-| SAP/ERP, Outlook, Teams, Automode | ✅ | – |
+| Start | `docker compose up`, or Python + Node | Open a link, no installation |
+| AI agents | Claude API, Ollama (offline) or rule-based | Claude via the viewer's own claude.ai account, or rule-based |
+| Web signals | Live crawling | Research prompt → Claude chat with web search → paste the answer back |
+| SAP/ERP, Outlook, Teams, auto mode | ✅ | – |
 
-Gebaut wird die Online-Version mit `cd frontend && npm run build:artifact`. Alle Unterschiede und wo sie im Code stecken stehen in [`docs/ARTIFACT_VARIANT.md`](docs/ARTIFACT_VARIANT.md).
+The online version is built with `cd frontend && npm run build:artifact`. All differences, and where they live in the code, are listed in [`docs/ARTIFACT_VARIANT.md`](docs/ARTIFACT_VARIANT.md).
 
-## Vom Paper zur Software
+## From paper to software
 
-| Paper (Abbildung 2–4) | Umsetzung |
+| Paper (Figures 2–4) | Implementation |
 |---|---|
-| **Internal Module**: Stammdaten, Spend Cube, Demand Planning, Quality Management, Risk Management | `backend/app/modules/internal_module.py`: berechnet bis zu 11 KPIs, jeweils mit Formel, Schwelle und Quelle. Fehlende Quellen werden ausgewiesen statt geraten. |
-| **External Module**: Webcrawler + AI Agent External Data | `backend/app/modules/external_module.py`: Crawling der Lieferanten-Website (beachtet robots.txt) und News-Suche; Klassifikation nach Kategorie, Signal und Schwere |
-| **Decision Module**: Mapping Indicators → Cross-Referencing → Argumentation Generation → AI Decision Making → Escalation? | `backend/app/modules/decision_module.py` + `backend/app/pipeline.py`: feste Task-Liste in genau dieser Reihenfolge, live im Cockpit verfolgbar |
+| **Internal Module**: master data, spend cube, demand planning, quality management, risk management | `backend/app/modules/internal_module.py`: computes up to 11 KPIs, each with its formula, threshold and source. Missing data sources are reported instead of guessed. |
+| **External Module**: web crawler + AI agent *External Data* | `backend/app/modules/external_module.py`: crawls the supplier's website (respecting robots.txt) and searches the news; classifies each document by category, signal and severity |
+| **Decision Module**: Mapping Indicators → Cross-Referencing → Argumentation Generation → AI Decision Making → Escalation? | `backend/app/modules/decision_module.py` + `backend/app/pipeline.py`: a fixed task list in exactly this order, which can be followed live in the cockpit |
 | Internal / External / Result Data Storage | SQLite (`backend/app/db.py`) |
-| Datenintegration aus internen Systemen über APIs | `backend/app/connectors/`: SAP S/4HANA, generisches ERP über REST, manuelle Erfassung |
-| Benachrichtigung des Einkäufers | `backend/app/notifiers/`: Cockpit, Outlook (Microsoft Graph), Microsoft Teams |
-| Regelmäßige, automatische Bewertung (z. B. quartalsweise) | `backend/app/automode.py` |
-| Offline-LLM für interne Daten | `LLM_PROVIDER=ollama` |
+| Data integration from internal systems via APIs | `backend/app/connectors/`: SAP S/4HANA, generic ERP via REST, manual entry |
+| Notification of the buyer | `backend/app/notifiers/`: cockpit, Outlook (Microsoft Graph), Microsoft Teams |
+| Regular, automated evaluation (e.g. quarterly) | `backend/app/automode.py` |
+| Offline LLM for internal data | `LLM_PROVIDER=ollama` |
 
-**Ablauf wie im Paper (Figure 2 und 4), ohne Score:**
+**Process as in the paper (Figures 2 and 4), without a score:**
 
-1. **Internal Module:** KPIs mit Formel, Schwelle und Quelle.
-2. **Risk?** (AI Agent Internal Data): Bei Nein folgt „Risikobewertung im nächsten Quartal“ und der Lauf endet. Bei Ja geht es weiter.
-3. **External Module:** Web-Signale.
-4. **Decision Module:** Mapping Indicators (Risiko-/Erfolgsindikator, deutlich/schwach) → Cross-Referencing (relativieren, abwägen, Finanzsignale vor Qualität priorisieren, Kombinationen) → Argumentation Generation → AI Decision Making: **Escalation?** + Empfehlung.
-5. **Escalation:** Ja geht an den Einkäufer, Nein in den Result Data Storage.
+1. **Internal Module:** KPIs with formula, threshold and source.
+2. **Risk?** (AI agent *Internal Data*): if no, the result is "risk evaluation next quarter" and the run ends. If yes, the run continues.
+3. **External Module:** web signals.
+4. **Decision Module:** Mapping Indicators (risk or success indicator, strong or weak) → Cross-Referencing (relativising and weighing indicators, prioritising financial over quality signals, detecting critical combinations) → Argumentation Generation → AI Decision Making: **Escalation?** plus a recommendation.
+5. **Escalation:** yes goes to the buyer, no goes to the Result Data Storage.
 
-KPIs und Prognose werden deterministisch im Code berechnet, damit jede Zahl nachvollziehbar bleibt. Die LLM-Agenten treffen die Entscheidungen und formulieren die Argumente. Ohne LLM (`LLM_PROVIDER=demo`) entscheiden transparente Regeln: Eskaliert wird bei einer kritischen Kombination oder einem finanziellen Indikator deutlich über seiner Schwelle. Qualitätsindikatoren allein führen nicht zur Eskalation.
+KPIs and forecasts are computed deterministically in code so that every figure stays traceable. The LLM agents make the decisions and formulate the arguments. Without an LLM (`LLM_PROVIDER=demo`), transparent rules decide: a case is escalated when there is a critical combination or a financial indicator clearly above its threshold. Quality indicators alone never lead to an escalation.
 
-## Lieferanten erfassen und suchen
+## Adding and finding suppliers
 
-- **Im Cockpit:** Über **＋** neben dem Suchfeld legst du einen Lieferanten an.
-  - Pflicht sind nur Lieferantennummer und Name.
-  - Optional erfasst du Kennzahlen: Spend Cube der letzten drei Jahre, Planvolumen, Coface-PD aktuell und vor 12 Monaten, Reklamationen und Liefertreue.
-  - Direkt nach dem Speichern bewerten die Agenten den Lieferanten. Fehlen Datenquellen, weist die Bewertung das sichtbar aus.
-- **Suche:** Das Suchfeld filtert nach Name und Lieferantennummer, außerdem nach Ort, Warengruppe und Einkäufer. Weitere Filter: Ergebnis (Eskaliert / Risiko erkannt / Kein Risiko), Warengruppe, Land, Eskalationen, Customer-Share ≥ 50 % und Mindest-PD.
-- **Über die API:** `POST /api/suppliers` (Stammdaten + optionale `figures`) oder `POST /api/suppliers/import` (aus einem Quellsystem, siehe unten).
+- **In the cockpit:** the **＋** button next to the search field adds a supplier.
+  - Only the supplier number and name are required.
+  - Key figures are optional: spend cube for the last three years, planned volume, current Coface PD and the value 12 months ago, complaint rate and on-time delivery.
+  - The agents evaluate the supplier immediately after saving. If data sources are missing, the assessment says so.
+- **Search:** the search field filters by name and supplier number, as well as by city, commodity and buyer. Further filters: result (escalated / risk detected / no risk), commodity, country, escalations only, customer share ≥ 50 % and minimum PD.
+- **Via the API:** `POST /api/suppliers` (master data plus optional `figures`) or `POST /api/suppliers/import` (from a source system, see below).
 
-## Schnittstellen (Backend)
+## Interfaces (backend)
 
-Die Schnittstellen zu SAP, weiteren Systemen, Outlook und Teams sind im Backend vollständig vorbereitet und per Umgebungsvariable aktivierbar. Ohne Konfiguration melden sie „nicht konfiguriert“, der Rest der App läuft normal weiter.
+The interfaces to SAP, other systems, Outlook and Teams are fully prepared in the backend and are activated through environment variables. Without configuration they report "not configured" and the rest of the application keeps running.
 
-⚠️ Getestet sind sie bisher nur gegen simulierte Antworten, nicht gegen echte SAP- oder Microsoft-365-Systeme.
+⚠️ So far they have only been tested against simulated responses, not against live SAP or Microsoft 365 systems.
 
-### Quellsysteme: Lieferantennummern suchen
+### Source systems: searching supplier numbers
 
-Jedes System implementiert `SourceConnector` (`backend/app/connectors/base.py`):
+Every system implements `SourceConnector` (`backend/app/connectors/base.py`):
 
-| Methode | Zweck |
+| Method | Purpose |
 |---|---|
-| `search(query)` | Lieferanten nach Nummer oder Name suchen |
-| `get_master(number)` | Stammdaten zu einer Lieferantennummer |
-| `get_internal_data(number)` | Kennzahlen für das Internal Module (Format siehe unten) |
+| `search(query)` | Find suppliers by number or name |
+| `get_master(number)` | Master data for a supplier number |
+| `get_internal_data(number)` | Key figures for the Internal Module (format below) |
 
-| Connector | ID | Konfiguration | Stand |
+| Connector | ID | Configuration | Status |
 |---|---|---|---|
-| Cockpit (manuell erfasst) | `local` | – | aktiv |
-| SAP S/4HANA | `sap` | `SAP_BASE_URL`, `SAP_CLIENT`, `SAP_USER`, `SAP_PASSWORD` | Suche und Stammdaten über OData `API_BUSINESS_PARTNER/A_Supplier`. Kennzahlen sind unternehmensspezifisch (Einkaufsinfosätze, Bestellhistorie, IBP/BW, QM-Meldungen); die Zuordnung ergänzt man in `get_internal_data`. |
-| Beliebiges System über REST | `erp` | `ERP_NAME`, `ERP_BASE_URL`, `ERP_TOKEN` | erwartet `GET /suppliers?q=`, `GET /suppliers/{nr}`, `GET /suppliers/{nr}/risk-data` |
+| Cockpit (manual entry) | `local` | – | active |
+| SAP S/4HANA | `sap` | `SAP_BASE_URL`, `SAP_CLIENT`, `SAP_USER`, `SAP_PASSWORD` | Search and master data via OData `API_BUSINESS_PARTNER/A_Supplier`. Key figures are company-specific (purchasing info records, purchase order history, IBP/BW, QM notifications); their mapping is added in `get_internal_data`. |
+| Any system via REST | `erp` | `ERP_NAME`, `ERP_BASE_URL`, `ERP_TOKEN` | expects `GET /suppliers?q=`, `GET /suppliers/{no}`, `GET /suppliers/{no}/risk-data` |
 
-Ein neues System anbinden heißt: eine Klasse von `SourceConnector` ableiten und in `connectors/__init__.py` registrieren.
+Connecting a new system means deriving a class from `SourceConnector` and registering it in `connectors/__init__.py`.
 
 API:
 
 ```http
-GET  /api/sources                                    # registrierte Systeme + Status
-GET  /api/sources/search?q=7001&source=sap&source=erp # Suche, auf Quellsysteme filterbar
+GET  /api/sources                                    # registered systems and their status
+GET  /api/sources/search?q=7001&source=sap&source=erp # search, filterable by source system
 POST /api/suppliers/import  {"source": "sap", "number": "100200", "buyer_email": "…"}
 ```
 
-### Benachrichtigungen: Outlook & Teams
+### Notifications: Outlook & Teams
 
-| Kanal | ID | Konfiguration |
+| Channel | ID | Configuration |
 |---|---|---|
-| Cockpit (Glocke) | `inapp` | – |
-| Outlook über Microsoft Graph `sendMail` | `outlook` | App-Registrierung in Entra ID mit Application-Permission `Mail.Send` (Admin-Consent; per Application Access Policy auf das Absender-Postfach beschränken) → `MS_TENANT_ID`, `MS_CLIENT_ID`, `MS_CLIENT_SECRET`, `OUTLOOK_SENDER` |
-| Microsoft Teams (Adaptive Card) | `teams` | Im Kanal: *Workflows → „Post to a channel when a webhook request is received“* → URL als `TEAMS_WEBHOOK_URL` |
+| Cockpit (bell icon) | `inapp` | – |
+| Outlook via Microsoft Graph `sendMail` | `outlook` | App registration in Entra ID with the application permission `Mail.Send` (admin consent; restrict it to the sender mailbox with an application access policy) → `MS_TENANT_ID`, `MS_CLIENT_ID`, `MS_CLIENT_SECRET`, `OUTLOOK_SENDER` |
+| Microsoft Teams (Adaptive Card) | `teams` | In the channel: *Workflows → "Post to a channel when a webhook request is received"* → URL as `TEAMS_WEBHOOK_URL` |
 
-Die Mail geht an die E-Mail-Adresse des Einkäufers aus den Stammdaten. Mail und Teams-Karte enthalten Zusammenfassung, Empfehlung, Maßnahmen und einen Direktlink (`APP_BASE_URL/?supplier=…`). Jeder Zustellversuch wird mit Status protokolliert (`GET /api/notifications`).
+The e-mail goes to the buyer's address from the master data. Both the e-mail and the Teams card contain the summary, the recommendation, the measures and a direct link (`APP_BASE_URL/?supplier=…`). Every delivery attempt is logged with its status (`GET /api/notifications`).
 
-### Automode
+### Auto mode
 
-Der Automode prüft in einem einstellbaren Intervall **alle hinterlegten Lieferantennummern**. Für jeden Lieferanten macht er drei Dinge:
+At a configurable interval, auto mode checks **every supplier number on record**. For each supplier it:
 
-1. aktualisiert Stammdaten und Kennzahlen aus dem jeweiligen Quellsystem,
-2. führt die komplette Agenten-Pipeline aus,
-3. schickt bei einer Eskalation automatisch eine Mail und/oder Teams-Nachricht an den verantwortlichen Einkäufer.
+1. refreshes master data and key figures from the respective source system,
+2. runs the complete agent pipeline,
+3. sends an e-mail and/or Teams message to the responsible buyer whenever a case is escalated.
 
-Einschalten lässt er sich im Cockpit (Schalter „Automode“), über die API (`PUT /api/automode {"enabled": true, "interval_minutes": 1440, "channels": ["outlook","teams"]}`, sofort starten mit `POST /api/automode/run`) oder mit `AUTOMODE_ENABLED=true` als Startwert.
+It can be switched on in the cockpit ("Automode" toggle), through the API (`PUT /api/automode {"enabled": true, "interval_minutes": 1440, "channels": ["outlook","teams"]}`, or start a run immediately with `POST /api/automode/run`), or with `AUTOMODE_ENABLED=true` as the initial value.
 
-## Schnellstart
+## Quick start
 
-### Mit Docker
+### With Docker
 
 ```bash
-cp .env.example .env          # LLM, SAP, Microsoft 365 … nach Bedarf eintragen
+cp .env.example .env          # add LLM, SAP, Microsoft 365 … settings as needed
 docker compose up --build
 # → http://localhost:8000
 ```
 
-### Entwicklung
+### Development
 
 ```bash
 # Backend
@@ -128,7 +134,7 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 
-# Frontend (zweites Terminal)
+# Frontend (second terminal)
 cd frontend
 npm install
 npm run dev
@@ -137,45 +143,45 @@ npm run dev
 
 Tests: `cd backend && pytest`
 
-Alle Einstellungen stehen kommentiert in [`.env.example`](.env.example). Mit `SEED_DEMO_DATA=false` startet das System ohne die fiktiven Demo-Lieferanten.
+All settings are documented in [`.env.example`](.env.example). With `SEED_DEMO_DATA=false` the system starts without the fictitious demo suppliers.
 
-## Datenformat Internal Module
+## Internal Module data format
 
-So liefern Quellsysteme die Kennzahlen (`get_internal_data` bzw. `GET /suppliers/{nr}/risk-data`). Alle Blöcke sind optional:
+This is how source systems deliver key figures (`get_internal_data` or `GET /suppliers/{no}/risk-data`). Every block is optional:
 
 ```jsonc
 {
   "as_of": "2025-12",
-  "revenue":  { "2023": 40.1, "2024": 41.0, "2025": 39.2 },  // Lieferantenumsatz, Mio. €
-  "purchase": { "2023": 12.3, "2024": 13.0, "2025": 14.1 },  // unser Einkaufsvolumen (Spend Cube)
-  "plan_snapshots": [                                          // Planstände aus der Bedarfsplanung
+  "revenue":  { "2023": 40.1, "2024": 41.0, "2025": 39.2 },  // supplier revenue, EUR m
+  "purchase": { "2023": 12.3, "2024": 13.0, "2025": 14.1 },  // our purchasing volume (spend cube)
+  "plan_snapshots": [                                          // plan versions from demand planning
     { "date": "2025-Q3", "volumes": { "2026": 13.5, "2027": 13.9 } }
   ],
-  "pd_history": [ { "date": "2025-05-01", "pd": 0.8 } ],      // Coface-Ratingstände
-  "quality": { "2025": { "ppm": 45, "otd": 0.97 } }           // Reklamationen, Liefertreue
+  "pd_history": [ { "date": "2025-05-01", "pd": 0.8 } ],      // Coface rating history
+  "quality": { "2025": { "ppm": 45, "otd": 0.97 } }           // complaints, on-time delivery
 }
 ```
 
-Die Schwellenwerte stehen zentral in `THRESHOLDS` (`internal_module.py`). Bis auf die 50-%-Grenze beim Customer-Share und den gelben Bereich der Coface-PD (~2 %) aus dem Paper sind es Annahmen, die an die internen Limits angepasst werden sollten. Die Priorisierung (finanziell vor extern vor operativ) und die Eskalationsregel stehen in `decision_module.py`.
+All thresholds are defined in `THRESHOLDS` (`internal_module.py`). Apart from the 50 % customer-share limit and the yellow area of the Coface PD (~2 %) taken from the paper, they are assumptions that should be aligned with the organisation's internal limits. The prioritisation (financial before external before operational) and the escalation rule are in `decision_module.py`.
 
-## API-Übersicht
+## API overview
 
-| Methode | Pfad | Zweck |
+| Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/suppliers?q=` | Lieferanten mit aktueller Bewertung, Suche nach Name/Nummer |
-| POST | `/api/suppliers` | Lieferant anlegen (und sofort bewerten) |
-| PUT / DELETE | `/api/suppliers/{id}` | Lieferant ändern / löschen |
-| GET | `/api/suppliers/{id}` | Bericht und Verlauf |
-| POST | `/api/suppliers/{id}/analyze` | Pipeline ausführen (Server-Sent Events) |
-| POST | `/api/cycle` | Alle Lieferanten bewerten (Server-Sent Events) |
-| GET | `/api/sources`, `/api/sources/search` | Quellsysteme und Suche |
-| POST | `/api/suppliers/import` | Lieferant aus Quellsystem übernehmen |
-| GET | `/api/channels`, `/api/notifications` | Kanäle und Zustellprotokoll |
-| GET / PUT | `/api/automode` | Automode-Status und -Einstellungen |
-| POST | `/api/automode/run` | Automode-Lauf sofort starten |
+| GET | `/api/suppliers?q=` | Suppliers with their latest assessment, search by name or number |
+| POST | `/api/suppliers` | Add a supplier (and evaluate it immediately) |
+| PUT / DELETE | `/api/suppliers/{id}` | Update / delete a supplier |
+| GET | `/api/suppliers/{id}` | Report and history |
+| POST | `/api/suppliers/{id}/analyze` | Run the pipeline (server-sent events) |
+| POST | `/api/cycle` | Evaluate all suppliers (server-sent events) |
+| GET | `/api/sources`, `/api/sources/search` | Source systems and search |
+| POST | `/api/suppliers/import` | Import a supplier from a source system |
+| GET | `/api/channels`, `/api/notifications` | Channels and delivery log |
+| GET / PUT | `/api/automode` | Auto mode status and settings |
+| POST | `/api/automode/run` | Start an auto mode run immediately |
 
-## Grenzen
+## Limitations
 
-- Die im Paper gezeigte Genauigkeit stammt aus einem einzigen Fall. Das belegt die Machbarkeit, aber keine allgemein gültige Trefferquote.
-- Die Anbindung an SAP, weitere Systeme und Microsoft 365 muss gegen die jeweilige Unternehmensumgebung getestet werden.
-- Für SAP fehlt noch die unternehmensspezifische Zuordnung der Transaktionsdaten.
+- The accuracy shown in the paper comes from a single case. It demonstrates feasibility, not a generally valid detection rate.
+- The connections to SAP, other systems and Microsoft 365 still need to be tested in the respective corporate environment.
+- For SAP, the company-specific mapping of transactional data is still to be added.
